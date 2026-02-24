@@ -10,92 +10,131 @@ public class WdkSwiftCore {
     private let requestIdQueue = DispatchQueue(label: "com.wdk.requestId")
     private var isWorkletStarted = false
     private let bundleName: String
-    private let bundle: Bundle
-    
+    private let bundlePath: String?
+
     // Read buffer for framing (accessed sequentially via async/await)
     private var readBuffer = Data()
-    
+
     /// Initialize WdkSwiftCore
     /// - Parameters:
-    ///   - bundleName: Name of the worklet bundle (default: "wdk-worklet.mobile").
-    ///                 This should match the filename of the .bundle resource without extension.
-    ///   - bundle: The Bundle where the worklet .bundle file is located (default: .main).
-    ///             Pass a custom Bundle if loading from a framework, test target, or app extension.
-    public init(bundleName: String = "wdk-worklet.mobile", bundle: Bundle = .main) {
+    ///   - bundleName: Name of the worklet bundle (default: platform-specific - "wdk-worklet.macos" on macOS, "wdk-worklet.mobile" on iOS)
+    ///   - bundlePath: Optional explicit path to the bundle. If provided, this takes precedence over auto-detection.
+    public init(bundleName: String? = nil, bundlePath: String? = nil) {
         self.worklet = Worklet()
-        self.bundleName = bundleName
-        self.bundle = bundle
+
+        // Use platform-specific default bundle name if not provided
+        #if os(macOS)
+        self.bundleName = bundleName ?? "wdk-worklet.macos"
+        #else
+        self.bundleName = bundleName ?? "wdk-worklet.mobile"
+        #endif
+        self.bundlePath = bundlePath
     }
-    
+
     deinit {
-        // Cleanup worklet on deinitialization
-        worklet.terminate()
+        if isWorkletStarted {
+            worklet.terminate()
+        }
     }
-    
+
+    /// Get the bundle path using 3-tier lookup:
+    /// 1. Explicit bundlePath parameter (highest priority)
+    /// 2. Auto-detect in Bundle.main (for consumer custom bundles)
+    /// 3. Fallback to module/test bundles
+    private func getBundlePath() -> String? {
+        // 1. Use explicit path if provided
+        if let explicitPath = bundlePath {
+            return explicitPath
+        }
+
+        // 2. Check main app bundle (for custom bundles in consumer apps)
+        if let mainPath = Bundle.main.path(forResource: bundleName, ofType: "bundle") {
+            return mainPath
+        }
+
+        // 3. Check module bundle or test directory
+        #if os(macOS)
+        // For testing: check Tests/Resources/macos/ directory
+        let testPath = FileManager.default.currentDirectoryPath
+            + "/Tests/Resources/macos/\(bundleName).bundle"
+        if FileManager.default.fileExists(atPath: testPath) {
+            return testPath
+        }
+        #endif
+
+        return nil
+    }
+
     /// Ensures the worklet and IPC are initialized
     private func ensureWorkletStarted() async throws {
         guard !isWorkletStarted else { return }
-        
-        // Start the worklet from the configured bundle
-        worklet.start(name: bundleName, ofType: "bundle", inBundle: bundle)
-        
+
+        // Get bundle path using 3-tier lookup
+        guard let fullPath = getBundlePath() else {
+            throw WDKError.bundleNotFound("Bundle not found: \(bundleName)")
+        }
+
+        // Load the bundle data and start the worklet
+        let bundleData = try Data(contentsOf: URL(fileURLWithPath: fullPath))
+        worklet.start(filename: fullPath, source: bundleData)
+
         // Give worklet time to initialize (500ms)
         try await Task.sleep(nanoseconds: 500_000_000)
-        
+
         // Create IPC after worklet is ready
         self.ipc = IPC(worklet: worklet)
-        
+
         isWorkletStarted = true
     }
-    
+
     // MARK: - Private Helper Methods
-    
+
     private func nextRequestId() -> Int {
         requestIdQueue.sync {
             requestId += 1
             return requestId
         }
     }
-    
+
     // MARK: - Framing Methods
-    
+
     /// Write a length-prefixed framed message: [4-byte length][message]
     private func writeFramed(data: Data) async throws {
         guard let ipc = self.ipc else {
             throw WDKError.ipcError("IPC not initialized")
         }
-        
+
         // Create 4-byte length prefix (big-endian UInt32)
         var length = UInt32(data.count).bigEndian
         let lengthData = Data(bytes: &length, count: 4)
-        
+
         // Write length + data
         try await ipc.write(data: lengthData + data)
     }
-    
+
     /// Read a length-prefixed framed message
     private func readFramed() async throws -> Data {
         // Read 4-byte length header
         let lengthData = try await readExactly(bytes: 4)
-        let length = lengthData.withUnsafeBytes { 
-            $0.load(as: UInt32.self).bigEndian 
+        let length = lengthData.withUnsafeBytes {
+            $0.load(as: UInt32.self).bigEndian
         }
-        
+
         // Validate message size (max 10MB for safety)
         guard length > 0 && length < 10_000_000 else {
             throw WDKError.ipcError("Invalid message length: \(length)")
         }
-        
+
         // Read exact message length
         return try await readExactly(bytes: Int(length))
     }
-    
+
     /// Read exactly N bytes, buffering as needed
     private func readExactly(bytes: Int) async throws -> Data {
         guard let ipc = self.ipc else {
             throw WDKError.ipcError("IPC not initialized")
         }
-        
+
         // Keep reading until we have enough bytes
         while readBuffer.count < bytes {
             guard let chunk = try await ipc.read() else {
@@ -103,63 +142,63 @@ public class WdkSwiftCore {
             }
             readBuffer.append(chunk)
         }
-        
+
         // Extract exactly the bytes we need
         let result = readBuffer.prefix(bytes)
         readBuffer = readBuffer.dropFirst(bytes)
         return Data(result)
     }
-    
+
     private func call(method: String, params: [String: Any]) async throws -> [String: Any] {
         // Ensure worklet and IPC are ready
         try await ensureWorkletStarted()
-        
+
         let id = nextRequestId()
-        
+
         let request: [String: Any] = [
             "jsonrpc": "2.0",
             "id": id,
             "method": method,
             "params": params
         ]
-        
+
         let requestData = try JSONSerialization.data(withJSONObject: request, options: [])
-        
+
         // Send framed request
         try await writeFramed(data: requestData)
-        
+
         // Read framed response
         let responseData = try await readFramed()
-        
+
         let obj = try JSONSerialization.jsonObject(with: responseData, options: [])
         guard let response = obj as? [String: Any] else {
             throw WDKError.invalidResponse("Invalid JSON response")
         }
-        
+
         // Check for JSON-RPC error
         if let error = response["error"] as? [String: Any] {
             let errorMessage = error["message"] as? String ?? "Unknown error"
             let errorCode = error["code"] as? String ?? "UNKNOWN"
             throw WDKError.rpcError(code: errorCode, message: errorMessage)
         }
-        
+
         // Return the result
         guard let result = response["result"] as? [String: Any] else {
             throw WDKError.invalidResponse("Missing result in response")
         }
-        
+
         return result
     }
-    
+
     // MARK: - Public API Methods
-    
+
     /// Start the worklet
     /// Note: This is called automatically on first use, but can be called explicitly
     /// to ensure the worklet is initialized before other operations.
     public func workletStart() async throws {
         _ = try await call(method: "workletStart", params: [:])
     }
-    
+
     /// Generate entropy and encrypt it (for new wallet creation)
     /// - Parameter wordCount: Number of words for mnemonic (12 or 24)
     /// - Returns: Encrypted entropy result
@@ -167,20 +206,20 @@ public class WdkSwiftCore {
         let result = try await call(method: "generateEntropyAndEncrypt", params: [
             "wordCount": wordCount
         ])
-        
+
         guard let encryptionKey = result["encryptionKey"] as? String,
               let encryptedSeedBuffer = result["encryptedSeedBuffer"] as? String,
               let encryptedEntropyBuffer = result["encryptedEntropyBuffer"] as? String else {
             throw WDKError.invalidResponse("Invalid generateEntropyAndEncrypt response")
         }
-        
+
         return EntropyResult(
             encryptionKey: encryptionKey,
             encryptedSeedBuffer: encryptedSeedBuffer,
             encryptedEntropyBuffer: encryptedEntropyBuffer
         )
     }
-    
+
     /// Get mnemonic from encrypted entropy
     /// - Parameters:
     ///   - encryptedEntropy: Base64-encoded encrypted entropy
@@ -191,14 +230,14 @@ public class WdkSwiftCore {
             "encryptedEntropy": encryptedEntropy,
             "encryptionKey": encryptionKey
         ])
-        
+
         guard let mnemonic = result["mnemonic"] as? String else {
             throw WDKError.invalidResponse("Invalid getMnemonicFromEntropy response")
         }
-        
+
         return mnemonic
     }
-    
+
     /// Convert mnemonic phrase to encrypted seed and entropy
     /// - Parameter mnemonic: BIP39 mnemonic phrase
     /// - Returns: Encrypted seed and entropy
@@ -206,20 +245,20 @@ public class WdkSwiftCore {
         let result = try await call(method: "getSeedAndEntropyFromMnemonic", params: [
             "mnemonic": mnemonic
         ])
-        
+
         guard let encryptionKey = result["encryptionKey"] as? String,
               let encryptedSeedBuffer = result["encryptedSeedBuffer"] as? String,
               let encryptedEntropyBuffer = result["encryptedEntropyBuffer"] as? String else {
             throw WDKError.invalidResponse("Invalid getSeedAndEntropyFromMnemonic response")
         }
-        
+
         return SeedAndEntropyResult(
             encryptionKey: encryptionKey,
             encryptedSeedBuffer: encryptedSeedBuffer,
             encryptedEntropyBuffer: encryptedEntropyBuffer
         )
     }
-    
+
     /// Initialize WDK with encrypted seed
     /// - Parameters:
     ///   - encryptionKey: Base64-encoded encryption key
@@ -232,7 +271,7 @@ public class WdkSwiftCore {
             "config": config
         ])
     }
-    
+
     /// Call any method on a WDK account
     /// - Parameters:
     ///   - methodName: The method name to call (e.g., "getAddress", "getBalance")
@@ -253,44 +292,44 @@ public class WdkSwiftCore {
             "network": network,
             "accountIndex": accountIndex
         ]
-        
+
         if let args = args {
             params["args"] = args
         }
-        
+
         if let options = options {
             params["options"] = options
         }
-        
+
         let result = try await call(method: "callMethod", params: params)
-        
+
         guard let methodResult = result["result"] else {
             throw WDKError.invalidResponse("Invalid callMethod response")
         }
-        
+
         return methodResult
     }
-    
+
     /// Register additional wallet(s) to an already initialized WDK instance
     /// - Parameter config: Wallet configuration JSON string
     public func registerWallet(config: String) async throws -> [String] {
         let result = try await call(method: "registerWallet", params: [
             "config": config
         ])
-        
+
         guard let blockchainsString = result["blockchains"] as? String else {
             throw WDKError.invalidResponse("Invalid registerWallet response")
         }
-        
+
         // Parse the blockchains JSON array
         guard let data = blockchainsString.data(using: .utf8),
               let blockchains = try? JSONSerialization.jsonObject(with: data) as? [String] else {
             throw WDKError.invalidResponse("Invalid blockchains format")
         }
-        
+
         return blockchains
     }
-    
+
     /// Register protocol to an already initialized WDK instance
     /// - Parameter config: Protocol configuration JSON string
     public func registerProtocol(config: String) async throws {
@@ -298,14 +337,14 @@ public class WdkSwiftCore {
             "config": config
         ])
     }
-    
+
     /// Dispose the WDK instance and clean up resources
     public func dispose() async throws {
         _ = try await call(method: "dispose", params: [:])
     }
-    
+
     // MARK: - Convenience Methods
-    
+
     /// Get account address
     /// - Parameters:
     ///   - network: Network name
@@ -317,14 +356,14 @@ public class WdkSwiftCore {
             network: network,
             accountIndex: accountIndex
         )
-        
+
         guard let address = result as? String else {
             throw WDKError.invalidResponse("Invalid address format")
         }
-        
+
         return address
     }
-    
+
     /// Get account balance
     /// - Parameters:
     ///   - network: Network name
@@ -336,11 +375,11 @@ public class WdkSwiftCore {
             network: network,
             accountIndex: accountIndex
         )
-        
+
         guard let balance = result as? String else {
             throw WDKError.invalidResponse("Invalid balance format")
         }
-        
+
         return balance
     }
 }

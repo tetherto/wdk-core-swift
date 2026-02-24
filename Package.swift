@@ -24,5 +24,9 @@ let package = Package(
                 .product(name: "BareKit", package: "bare-kit-swift"),
             ]
         ),
+        .testTarget(
+            name: "WdkSwiftCoreTests",
+            dependencies: ["WdkSwiftCore"]
+        ),
     ]
 )
