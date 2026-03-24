@@ -1,6 +1,6 @@
 # WdkSwiftCore
 
-A Swift Package for the [Tether WDK](https://github.com/ArcadeLabsInc/pear-wrk-wdk-jsonrpc) (Web3 Development Kit). Provides a clean async/await API for wallet operations, key management, and multi-chain interactions on iOS and macOS.
+A Swift Package for the [Tether WDK](https://github.com/claudiovb/pear-wrk-wdk-jsonrpc) (Web3 Development Kit). Provides a clean async/await API for wallet operations, key management, and multi-chain interactions on iOS and macOS.
 
 Supported networks: Ethereum, Polygon, Arbitrum, Sepolia, Solana, and ERC-4337.
 
@@ -16,10 +16,10 @@ This gives you the `WdkSwiftCore` Swift API.
 
 Download `prebuilds.zip` and `addons.zip` from the [latest release](https://github.com/claudiovb/pear-wrk-wdk-jsonrpc/releases/latest).
 
-| File | Contents |
-|------|----------|
+| File            | Contents                                                                |
+| --------------- | ----------------------------------------------------------------------- |
 | `prebuilds.zip` | `BareKit.xcframework` (runtime) + `wdk-worklet.mobile.bundle` (worklet) |
-| `addons.zip` | 17 native addon xcframeworks required by the Bare runtime |
+| `addons.zip`    | 17 native addon xcframeworks required by the Bare runtime               |
 
 ### Step 3 -- Add to Xcode Project
 
@@ -94,28 +94,28 @@ let wdk = WdkSwiftCore(bundle: Bundle(for: MyClass.self))
 
 ### Wallet Lifecycle
 
-| Method | Description |
-|--------|-------------|
-| `generateEntropyAndEncrypt(wordCount:)` | Generate a new mnemonic (12 or 24 words) and return encrypted entropy |
-| `getMnemonicFromEntropy(encryptedEntropy:encryptionKey:)` | Decrypt entropy to get the mnemonic phrase |
-| `getSeedAndEntropyFromMnemonic(mnemonic:)` | Convert an existing mnemonic to encrypted seed + entropy |
-| `initializeWDK(encryptionKey:encryptedSeed:config:)` | Initialize WDK with keys and network configuration |
-| `dispose()` | Clean up all resources |
+| Method                                                    | Description                                                           |
+| --------------------------------------------------------- | --------------------------------------------------------------------- |
+| `generateEntropyAndEncrypt(wordCount:)`                   | Generate a new mnemonic (12 or 24 words) and return encrypted entropy |
+| `getMnemonicFromEntropy(encryptedEntropy:encryptionKey:)` | Decrypt entropy to get the mnemonic phrase                            |
+| `getSeedAndEntropyFromMnemonic(mnemonic:)`                | Convert an existing mnemonic to encrypted seed + entropy              |
+| `initializeWDK(encryptionKey:encryptedSeed:config:)`      | Initialize WDK with keys and network configuration                    |
+| `dispose()`                                               | Clean up all resources                                                |
 
 ### Account Operations
 
-| Method | Description |
-|--------|-------------|
-| `getAddress(network:accountIndex:)` | Get the account address for a network |
-| `getBalance(network:accountIndex:)` | Get the account balance for a network |
-| `callMethod(methodName:network:accountIndex:args:options:)` | Call any WDK method on an account |
+| Method                                                      | Description                           |
+| ----------------------------------------------------------- | ------------------------------------- |
+| `getAddress(network:accountIndex:)`                         | Get the account address for a network |
+| `getBalance(network:accountIndex:)`                         | Get the account balance for a network |
+| `callMethod(methodName:network:accountIndex:args:options:)` | Call any WDK method on an account     |
 
 ### Dynamic Registration
 
-| Method | Description |
-|--------|-------------|
-| `registerWallet(config:)` | Register additional wallet types at runtime |
-| `registerProtocol(config:)` | Register additional protocols at runtime |
+| Method                      | Description                                 |
+| --------------------------- | ------------------------------------------- |
+| `registerWallet(config:)`   | Register additional wallet types at runtime |
+| `registerProtocol(config:)` | Register additional protocols at runtime    |
 
 ## Error Handling
 
@@ -135,7 +135,7 @@ public enum WDKError: Error {
 
 If you need a custom worklet with different WDK modules or network configurations:
 
-1. Clone the [pear-wrk-wdk-jsonrpc](https://github.com/ArcadeLabsInc/pear-wrk-wdk-jsonrpc) repo
+1. Clone the [pear-wrk-wdk-jsonrpc](https://github.com/claudiovb/pear-wrk-wdk-jsonrpc) repo
 2. Modify `package.json` dependencies and `src/` as needed
 3. Run `npm install && npm run build:bundle` to generate your custom bundle
 4. Replace `wdk-worklet.mobile.bundle` in your Xcode project with your custom build

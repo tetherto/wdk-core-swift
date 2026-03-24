@@ -438,4 +438,69 @@ struct WDKOperationTests {
 
         try await wdk.dispose()
     }
+
+    @Test("Concurrent calls return correct responses", .timeLimit(.minutes(2)))
+    func testConcurrentCalls() async throws {
+        let wdk = WDKOperationTests.wdk
+        let entropy = try await wdk.generateEntropyAndEncrypt(wordCount: 12)
+
+        let config = """
+        {
+          "networks": {
+            "ethereum": { "chainId": 1 },
+            "polygon": { "chainId": 137 }
+          }
+        }
+        """
+
+        try await wdk.initializeWDK(
+            encryptionKey: entropy.encryptionKey,
+            encryptedSeed: entropy.encryptedSeedBuffer,
+            config: config
+        )
+
+        async let ethAddress = wdk.getAddress(network: "ethereum", accountIndex: 0)
+        async let polyAddress = wdk.getAddress(network: "polygon", accountIndex: 0)
+        async let ethAddress1 = wdk.getAddress(network: "ethereum", accountIndex: 1)
+
+        let results = try await (ethAddress, polyAddress, ethAddress1)
+
+        #expect(results.0.hasPrefix("0x"))
+        #expect(results.0.count == 42)
+        #expect(results.1.hasPrefix("0x"))
+        #expect(results.1.count == 42)
+        #expect(results.2.hasPrefix("0x"))
+        #expect(results.2.count == 42)
+
+        // Same chain, different indices must differ
+        #expect(results.0 != results.2)
+
+        // Verify determinism: call again sequentially and compare
+        let ethAgain = try await wdk.getAddress(network: "ethereum", accountIndex: 0)
+        let polyAgain = try await wdk.getAddress(network: "polygon", accountIndex: 0)
+
+        #expect(results.0 == ethAgain)
+        #expect(results.1 == polyAgain)
+    }
+
+    @Test("Concurrent entropy generation", .timeLimit(.minutes(2)))
+    func testConcurrentEntropyGeneration() async throws {
+        let wdk = WDKOperationTests.wdk
+
+        async let entropy1 = wdk.generateEntropyAndEncrypt(wordCount: 12)
+        async let entropy2 = wdk.generateEntropyAndEncrypt(wordCount: 12)
+        async let entropy3 = wdk.generateEntropyAndEncrypt(wordCount: 12)
+
+        let results = try await (entropy1, entropy2, entropy3)
+
+        // All should succeed with non-empty values
+        #expect(!results.0.encryptionKey.isEmpty)
+        #expect(!results.1.encryptionKey.isEmpty)
+        #expect(!results.2.encryptionKey.isEmpty)
+
+        // Each generation should produce unique keys
+        #expect(results.0.encryptionKey != results.1.encryptionKey)
+        #expect(results.1.encryptionKey != results.2.encryptionKey)
+        #expect(results.0.encryptionKey != results.2.encryptionKey)
+    }
 }
