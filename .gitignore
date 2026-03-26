@@ -1,0 +1,23 @@
+# Swift / SPM
+.DS_Store
+/.build
+/Packages
+xcuserdata/
+DerivedData/
+.swiftpm/configuration/registries.json
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.swiftpm
+.netrc
+
+# Frameworks (consumer-provided, not part of the SPM package)
+Frameworks/
+*.xcframework
+*.framework
+
+# Test resources (generated locally)
+Tests/Resources/
+Tests/**/*.bundle
+Tests/**/*.framework
+
+#Local scripts
+*.local.sh
