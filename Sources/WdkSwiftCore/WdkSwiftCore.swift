@@ -1,8 +1,38 @@
 import Foundation
 import BareKit
 
+// MARK: - Pending Requests Actor
+
+/// Thread-safe storage for in-flight JSON-RPC continuations, keyed by request ID.
+/// The reader loop resolves/rejects entries; callers register before sending.
+private actor PendingRequests {
+    private var continuations: [Int: CheckedContinuation<[String: Any], Error>] = [:]
+
+    func register(id: Int, continuation: CheckedContinuation<[String: Any], Error>) {
+        continuations[id] = continuation
+    }
+
+    func resolve(id: Int, with response: [String: Any]) {
+        continuations.removeValue(forKey: id)?.resume(returning: response)
+    }
+
+    func reject(id: Int, with error: Error) {
+        continuations.removeValue(forKey: id)?.resume(throwing: error)
+    }
+
+    func rejectAll(with error: Error) {
+        for (_, continuation) in continuations {
+            continuation.resume(throwing: error)
+        }
+        continuations.removeAll()
+    }
+}
+
+// MARK: - WdkSwiftCore
+
 /// Swift client for WDK operations via JSON-RPC 2.0
-/// Handles worklet lifecycle and IPC communication internally
+/// Handles worklet lifecycle and IPC communication internally.
+/// Supports concurrent calls via ID-based response multiplexing.
 public class WdkSwiftCore {
     private let worklet: Worklet
     private var ipc: IPC?
@@ -12,8 +42,23 @@ public class WdkSwiftCore {
     private let bundleName: String
     private let bundlePath: String?
 
-    // Read buffer for framing (accessed sequentially via async/await)
+    private let pending = PendingRequests()
+    private var readerLoopStarted = false
+
+    private var initializationTask: Task<Void, Error>?
+    private let initLock = NSLock()
+
+    // Read buffer for framing (owned exclusively by the reader loop)
     private var readBuffer = Data()
+
+    // Write serialization via AsyncStream FIFO queue
+    private var writeContinuation: AsyncStream<WriteRequest>.Continuation?
+    private var writerLoopStarted = false
+
+    private struct WriteRequest {
+        let data: Data
+        let continuation: CheckedContinuation<Void, Error>
+    }
 
     /// Initialize WdkSwiftCore
     /// - Parameters:
@@ -22,7 +67,6 @@ public class WdkSwiftCore {
     public init(bundleName: String? = nil, bundlePath: String? = nil) {
         self.worklet = Worklet()
 
-        // Use platform-specific default bundle name if not provided
         #if os(macOS)
         self.bundleName = bundleName ?? "wdk-worklet.macos"
         #else
@@ -32,6 +76,7 @@ public class WdkSwiftCore {
     }
 
     deinit {
+        writeContinuation?.finish()
         if isWorkletStarted {
             worklet.terminate()
         }
@@ -42,19 +87,15 @@ public class WdkSwiftCore {
     /// 2. Auto-detect in Bundle.main (for consumer custom bundles)
     /// 3. Fallback to module/test bundles
     private func getBundlePath() -> String? {
-        // 1. Use explicit path if provided
         if let explicitPath = bundlePath {
             return explicitPath
         }
 
-        // 2. Check main app bundle (for custom bundles in consumer apps)
         if let mainPath = Bundle.main.path(forResource: bundleName, ofType: "bundle") {
             return mainPath
         }
 
-        // 3. Check module bundle or test directory
         #if os(macOS)
-        // For testing: check Tests/Resources/macos/ directory
         let testPath = FileManager.default.currentDirectoryPath
             + "/Tests/Resources/macos/\(bundleName).bundle"
         if FileManager.default.fileExists(atPath: testPath) {
@@ -65,26 +106,38 @@ public class WdkSwiftCore {
         return nil
     }
 
-    /// Ensures the worklet and IPC are initialized
-    private func ensureWorkletStarted() async throws {
-        guard !isWorkletStarted else { return }
+    /// Returns the shared initialization task, creating one if needed.
+    /// Synchronous so that NSLock is never held across a suspension point.
+    private func resolveInitTask() -> Task<Void, Error>? {
+        initLock.lock()
+        defer { initLock.unlock() }
 
-        // Get bundle path using 3-tier lookup
-        guard let fullPath = getBundlePath() else {
-            throw WDKError.bundleNotFound("Bundle not found: \(bundleName)")
+        if isWorkletStarted { return nil }
+        if let existing = initializationTask { return existing }
+
+        let newTask = Task<Void, Error> {
+            guard let fullPath = self.getBundlePath() else {
+                throw WDKError.bundleNotFound("Bundle not found: \(self.bundleName)")
+            }
+
+            let bundleData = try Data(contentsOf: URL(fileURLWithPath: fullPath))
+            self.worklet.start(filename: fullPath, source: bundleData)
+
+            self.ipc = IPC(worklet: self.worklet)
+            self.isWorkletStarted = true
+
+            self.startReaderLoop()
+            self.startWriterLoop()
         }
+        initializationTask = newTask
+        return newTask
+    }
 
-        // Load the bundle data and start the worklet
-        let bundleData = try Data(contentsOf: URL(fileURLWithPath: fullPath))
-        worklet.start(filename: fullPath, source: bundleData)
-
-        // Give worklet time to initialize (500ms)
-        try await Task.sleep(nanoseconds: 500_000_000)
-
-        // Create IPC after worklet is ready
-        self.ipc = IPC(worklet: worklet)
-
-        isWorkletStarted = true
+    /// Ensures the worklet and IPC are initialized exactly once,
+    /// even when multiple callers race on the first call.
+    private func ensureWorkletStarted() async throws {
+        guard let task = resolveInitTask() else { return }
+        try await task.value
     }
 
     // MARK: - Private Helper Methods
@@ -96,46 +149,93 @@ public class WdkSwiftCore {
         }
     }
 
-    // MARK: - Framing Methods
+    // MARK: - Reader Loop
 
-    /// Write a length-prefixed framed message: [4-byte length][message]
-    private func writeFramed(data: Data) async throws {
-        guard let ipc = self.ipc else {
-            throw WDKError.ipcError("IPC not initialized")
+    /// Single persistent task that reads all incoming framed messages
+    /// and dispatches each to the correct caller via the pending requests map.
+    private func startReaderLoop() {
+        guard !readerLoopStarted else { return }
+        readerLoopStarted = true
+
+        Task { [weak self] in
+            do {
+                while true {
+                    guard let self else { break }
+                    let data = try await self.readFramed()
+
+                    guard let obj = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                          let id = obj["id"] as? Int else {
+                        continue
+                    }
+
+                    await self.pending.resolve(id: id, with: obj)
+                }
+            } catch {
+                await self?.pending.rejectAll(with: error)
+            }
         }
-
-        // Create 4-byte length prefix (big-endian UInt32)
-        var length = UInt32(data.count).bigEndian
-        let lengthData = Data(bytes: &length, count: 4)
-
-        // Write length + data
-        try await ipc.write(data: lengthData + data)
     }
 
-    /// Read a length-prefixed framed message
+    // MARK: - Writer Loop
+
+    /// Single persistent task that serializes all outgoing writes through a FIFO queue.
+    /// Prevents interleaved writes when multiple calls are in flight.
+    private func startWriterLoop() {
+        guard !writerLoopStarted else { return }
+        writerLoopStarted = true
+
+        let (stream, continuation) = AsyncStream<WriteRequest>.makeStream()
+        self.writeContinuation = continuation
+
+        Task { [weak self] in
+            for await request in stream {
+                guard let self = self, let ipc = self.ipc else {
+                    request.continuation.resume(throwing: WDKError.ipcError("IPC not initialized"))
+                    continue
+                }
+                do {
+                    try await ipc.write(data: request.data)
+                    request.continuation.resume()
+                } catch {
+                    request.continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    // MARK: - Framing Methods
+
+    /// Write a length-prefixed framed message via the serialized writer queue.
+    private func writeFramed(data: Data) async throws {
+        var length = UInt32(data.count).bigEndian
+        let lengthData = Data(bytes: &length, count: 4)
+        let frame = lengthData + data
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            writeContinuation?.yield(WriteRequest(data: frame, continuation: continuation))
+        }
+    }
+
+    /// Read a length-prefixed framed message (only called from the reader loop)
     private func readFramed() async throws -> Data {
-        // Read 4-byte length header
         let lengthData = try await readExactly(bytes: 4)
         let length = lengthData.withUnsafeBytes {
             $0.load(as: UInt32.self).bigEndian
         }
 
-        // Validate message size (max 10MB for safety)
         guard length > 0 && length < 10_000_000 else {
             throw WDKError.ipcError("Invalid message length: \(length)")
         }
 
-        // Read exact message length
         return try await readExactly(bytes: Int(length))
     }
 
-    /// Read exactly N bytes, buffering as needed
+    /// Read exactly N bytes, buffering as needed (only called from the reader loop)
     private func readExactly(bytes: Int) async throws -> Data {
         guard let ipc = self.ipc else {
             throw WDKError.ipcError("IPC not initialized")
         }
 
-        // Keep reading until we have enough bytes
         while readBuffer.count < bytes {
             guard let chunk = try await ipc.read() else {
                 throw WDKError.ipcError("Connection closed while reading")
@@ -143,14 +243,16 @@ public class WdkSwiftCore {
             readBuffer.append(chunk)
         }
 
-        // Extract exactly the bytes we need
         let result = readBuffer.prefix(bytes)
         readBuffer = readBuffer.dropFirst(bytes)
         return Data(result)
     }
 
+    // MARK: - Core RPC Call
+
+    /// Send a JSON-RPC request and await its response, matched by ID.
+    /// Multiple concurrent calls are supported -- each gets its own response.
     private func call(method: String, params: [String: Any]) async throws -> [String: Any] {
-        // Ensure worklet and IPC are ready
         try await ensureWorkletStarted()
 
         let id = nextRequestId()
@@ -164,25 +266,31 @@ public class WdkSwiftCore {
 
         let requestData = try JSONSerialization.data(withJSONObject: request, options: [])
 
-        // Send framed request
-        try await writeFramed(data: requestData)
+        let response: [String: Any] = try await withCheckedThrowingContinuation { continuation in
+            Task {
+                await self.pending.register(id: id, continuation: continuation)
 
-        // Read framed response
-        let responseData = try await readFramed()
-
-        let obj = try JSONSerialization.jsonObject(with: responseData, options: [])
-        guard let response = obj as? [String: Any] else {
-            throw WDKError.invalidResponse("Invalid JSON response")
+                do {
+                    try await self.writeFramed(data: requestData)
+                } catch {
+                    await self.pending.reject(id: id, with: error)
+                }
+            }
         }
 
-        // Check for JSON-RPC error
         if let error = response["error"] as? [String: Any] {
             let errorMessage = error["message"] as? String ?? "Unknown error"
-            let errorCode = error["code"] as? String ?? "UNKNOWN"
+            let errorCode: String
+            if let code = error["code"] as? String {
+                errorCode = code
+            } else if let code = error["code"] as? Int {
+                errorCode = String(code)
+            } else {
+                errorCode = "UNKNOWN"
+            }
             throw WDKError.rpcError(code: errorCode, message: errorMessage)
         }
 
-        // Return the result
         guard let result = response["result"] as? [String: Any] else {
             throw WDKError.invalidResponse("Missing result in response")
         }
@@ -321,7 +429,6 @@ public class WdkSwiftCore {
             throw WDKError.invalidResponse("Invalid registerWallet response")
         }
 
-        // Parse the blockchains JSON array
         guard let data = blockchainsString.data(using: .utf8),
               let blockchains = try? JSONSerialization.jsonObject(with: data) as? [String] else {
             throw WDKError.invalidResponse("Invalid blockchains format")
