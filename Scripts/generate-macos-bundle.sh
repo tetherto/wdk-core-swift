@@ -11,11 +11,11 @@ set -e
 #   ./Scripts/generate-macos-bundle.sh [--tag <version>]
 #
 # Options:
-#   --tag <version>   Release tag to download (default: v1.0.0-beta.2)
+#   --tag <version>   Release tag to download (default: v1.0.0-beta.3)
 # =============================================================================
 
 REPO="claudiovb/pear-wrk-wdk-jsonrpc"
-TAG="v1.0.0-beta.2"
+TAG="v1.0.0-beta.3"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"

@@ -5,7 +5,6 @@ public enum WDKError: Error {
     case ipcError(String)
     case rpcError(code: String, message: String)
     case invalidResponse(String)
-    case encodingError(String)
     case bundleNotFound(String)
 }
 
@@ -18,8 +17,6 @@ extension WDKError: LocalizedError {
             return "RPC Error [\(code)]: \(message)"
         case .invalidResponse(let message):
             return "Invalid Response: \(message)"
-        case .encodingError(let message):
-            return "Encoding Error: \(message)"
         case .bundleNotFound(let message):
             return "Bundle Not Found: \(message)"
         }

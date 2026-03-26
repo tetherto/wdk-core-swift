@@ -1,6 +1,6 @@
 # WdkSwiftCore
 
-A Swift Package for the [Tether WDK](https://github.com/claudiovb/pear-wrk-wdk-jsonrpc) (Web3 Development Kit). Provides a clean async/await API for wallet operations, key management, and multi-chain interactions on iOS and macOS.
+A Swift Package for the [Tether WDK](https://github.com/Tetherto/wdk) (Wallet Development Kit). Provides a clean async/await API for wallet operations, key management, and multi-chain interactions on iOS and macOS.
 
 Supported networks: Ethereum, Polygon, Arbitrum, Sepolia, Solana, and ERC-4337.
 
@@ -88,8 +88,8 @@ let wdk = WdkSwiftCore()
 // Custom bundle name
 let wdk = WdkSwiftCore(bundleName: "my-custom-worklet.mobile")
 
-// Custom Bundle location (for frameworks, test targets, or app extensions)
-let wdk = WdkSwiftCore(bundle: Bundle(for: MyClass.self))
+// Custom bundle path (for frameworks, test targets, or app extensions)
+let wdk = WdkSwiftCore(bundlePath: "/path/to/wdk-worklet.mobile.bundle")
 ```
 
 ### Wallet Lifecycle
@@ -126,7 +126,6 @@ public enum WDKError: Error {
     case ipcError(String)           // Communication failure with the worklet
     case rpcError(code: String, message: String)  // Error returned by the WDK worklet
     case invalidResponse(String)    // Unexpected response format
-    case encodingError(String)      // JSON serialization failure
     case bundleNotFound(String)     // Worklet bundle not found in the app
 }
 ```

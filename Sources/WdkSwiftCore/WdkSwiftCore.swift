@@ -45,6 +45,9 @@ public class WdkSwiftCore {
     private let pending = PendingRequests()
     private var readerLoopStarted = false
 
+    private var initializationTask: Task<Void, Error>?
+    private let initLock = NSLock()
+
     // Read buffer for framing (owned exclusively by the reader loop)
     private var readBuffer = Data()
 
@@ -103,24 +106,38 @@ public class WdkSwiftCore {
         return nil
     }
 
-    /// Ensures the worklet and IPC are initialized
-    private func ensureWorkletStarted() async throws {
-        guard !isWorkletStarted else { return }
+    /// Returns the shared initialization task, creating one if needed.
+    /// Synchronous so that NSLock is never held across a suspension point.
+    private func resolveInitTask() -> Task<Void, Error>? {
+        initLock.lock()
+        defer { initLock.unlock() }
 
-        guard let fullPath = getBundlePath() else {
-            throw WDKError.bundleNotFound("Bundle not found: \(bundleName)")
+        if isWorkletStarted { return nil }
+        if let existing = initializationTask { return existing }
+
+        let newTask = Task<Void, Error> {
+            guard let fullPath = self.getBundlePath() else {
+                throw WDKError.bundleNotFound("Bundle not found: \(self.bundleName)")
+            }
+
+            let bundleData = try Data(contentsOf: URL(fileURLWithPath: fullPath))
+            self.worklet.start(filename: fullPath, source: bundleData)
+
+            self.ipc = IPC(worklet: self.worklet)
+            self.isWorkletStarted = true
+
+            self.startReaderLoop()
+            self.startWriterLoop()
         }
+        initializationTask = newTask
+        return newTask
+    }
 
-        let bundleData = try Data(contentsOf: URL(fileURLWithPath: fullPath))
-        worklet.start(filename: fullPath, source: bundleData)
-
-        try await Task.sleep(nanoseconds: 500_000_000)
-
-        self.ipc = IPC(worklet: worklet)
-        isWorkletStarted = true
-
-        startReaderLoop()
-        startWriterLoop()
+    /// Ensures the worklet and IPC are initialized exactly once,
+    /// even when multiple callers race on the first call.
+    private func ensureWorkletStarted() async throws {
+        guard let task = resolveInitTask() else { return }
+        try await task.value
     }
 
     // MARK: - Private Helper Methods
@@ -141,9 +158,9 @@ public class WdkSwiftCore {
         readerLoopStarted = true
 
         Task { [weak self] in
-            guard let self = self else { return }
             do {
                 while true {
+                    guard let self else { break }
                     let data = try await self.readFramed()
 
                     guard let obj = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
@@ -154,7 +171,7 @@ public class WdkSwiftCore {
                     await self.pending.resolve(id: id, with: obj)
                 }
             } catch {
-                await self.pending.rejectAll(with: error)
+                await self?.pending.rejectAll(with: error)
             }
         }
     }
@@ -263,7 +280,14 @@ public class WdkSwiftCore {
 
         if let error = response["error"] as? [String: Any] {
             let errorMessage = error["message"] as? String ?? "Unknown error"
-            let errorCode = error["code"] as? String ?? "UNKNOWN"
+            let errorCode: String
+            if let code = error["code"] as? String {
+                errorCode = code
+            } else if let code = error["code"] as? Int {
+                errorCode = String(code)
+            } else {
+                errorCode = "UNKNOWN"
+            }
             throw WDKError.rpcError(code: errorCode, message: errorMessage)
         }
 
