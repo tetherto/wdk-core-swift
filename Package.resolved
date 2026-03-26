@@ -1,5 +1,4 @@
 {
-  "originHash" : "e0116bac4af9e7230e4cc7ea919fd113931949c5f37fce9367754ab2bbc84365",
   "pins" : [
     {
       "identity" : "bare-kit-swift",
@@ -11,5 +10,5 @@
       }
     }
   ],
-  "version" : 3
+  "version" : 2
 }

@@ -1,164 +1,77 @@
 # WdkSwiftCore
 
-Swift wrapper for Web3 Development Kit (WDK) using Bare worklets for secure wallet operations.
+A Swift Package for the [Tether WDK](https://github.com/Tetherto/wdk) (Wallet Development Kit). Provides a clean async/await API for wallet operations, key management, and multi-chain interactions on iOS and macOS.
 
-## Overview
+Supported networks: Ethereum, Polygon, Arbitrum, Sepolia, Solana, and ERC-4337.
 
-WdkSwiftCore provides a Swift interface to the WDK (Web3 Development Kit) by running JavaScript worklets via BareKit. This enables secure, isolated execution of wallet operations including mnemonic generation, seed management, and blockchain interactions.
+## Integration Guide
 
-## Features
+### Step 1 -- Add the SPM Package
 
-- 🔐 Secure mnemonic generation and encryption
-- 🔑 BIP39-compliant seed phrase handling
-- ⛓️ Multi-chain wallet support (EVM, Solana, etc.)
-- 🔄 JSON-RPC 2.0 communication with worklets
-- 📦 Custom worklet bundle support
-- 🧪 Full test coverage with macOS bundles
+In Xcode: **File > Add Package Dependencies** and enter this repository URL.
 
-## Installation
+This gives you the `WdkSwiftCore` Swift API.
 
-### 1. Add SwiftPM Dependency
+### Step 2 -- Download Release Artifacts
 
-Add WdkSwiftCore to your `Package.swift`:
+Download `prebuilds.zip` and `addons.zip` from the [latest release](https://github.com/claudiovb/pear-wrk-wdk-jsonrpc/releases/latest).
 
-```swift
-dependencies: [
-    .package(url: "https://github.com/tetherto/wdk-swift-core", from: "1.0.0")
-]
-```
+| File            | Contents                                                                |
+| --------------- | ----------------------------------------------------------------------- |
+| `prebuilds.zip` | `BareKit.xcframework` (runtime) + `wdk-worklet.mobile.bundle` (worklet) |
+| `addons.zip`    | 17 native addon xcframeworks required by the Bare runtime               |
 
-Or add via Xcode:
-1. File → Add Package Dependencies
-2. Enter: `https://github.com/tetherto/wdk-swift-core`
-3. Select version and add to your target
+### Step 3 -- Add to Xcode Project
 
-### 2. Download iOS Frameworks
+1. **BareKit.xcframework** -- Drag into your Xcode project. In your target's **General > Frameworks, Libraries, and Embedded Content**, set it to **Embed & Sign**.
 
-**Required for iOS apps:**
+2. **wdk-worklet.mobile.bundle** -- Drag into your Xcode project navigator. Ensure it appears in your target's **Build Phases > Copy Bundle Resources**.
 
-1. Go to [Releases](https://github.com/tetherto/wdk-swift-core/releases)
-2. Download `prebuilds.zip` from the latest release
-3. Unzip the archive
-4. Add all `.xcframework` files to your Xcode project:
-   - Drag frameworks into your project navigator
-   - Select "Embed & Sign" in target's Frameworks settings
+3. **17 addon xcframeworks** -- Drag all xcframeworks from the unzipped `addons.zip` into your project. Add them to **Frameworks, Libraries, and Embedded Content** with **Embed & Sign**.
 
-### 3. Download BareKit Framework
+   If using XcodeGen, an `addons.yml` is included in `addons.zip` that you can include in your `project.yml`.
 
-**Required for all platforms:**
+Build and run.
 
-1. Go to [bare-kit releases](https://github.com/holepunchto/bare-kit/releases)
-2. Download `prebuilds.zip` from the latest release
-3. Extract `BareKit.xcframework`
-4. Add to your Xcode project with "Embed & Sign"
-
-## Usage
-
-### Basic Example
+## Quick Start
 
 ```swift
 import WdkSwiftCore
 
-// Initialize WDK
+// Initialize
 let wdk = WdkSwiftCore()
 
-// Generate new wallet
+// Create a new wallet
 let entropy = try await wdk.generateEntropyAndEncrypt(wordCount: 12)
+
+// Show the mnemonic to the user for backup
 let mnemonic = try await wdk.getMnemonicFromEntropy(
     encryptedEntropy: entropy.encryptedEntropyBuffer,
     encryptionKey: entropy.encryptionKey
 )
+print("Backup phrase: \(mnemonic)")
 
-print("Mnemonic: \(mnemonic)")
-
-// Initialize WDK with configuration
+// Initialize WDK with network configuration
 let config = """
 {
-  "wallets": [{
-    "name": "ethereum",
-    "type": "evm",
-    "chainId": 1
-  }]
+    "networks": {
+        "ethereum": { "rpcUrl": "https://eth-mainnet.example.com" }
+    }
 }
 """
-
 try await wdk.initializeWDK(
     encryptionKey: entropy.encryptionKey,
     encryptedSeed: entropy.encryptedSeedBuffer,
     config: config
 )
 
-// Get account address
+// Get an address
 let address = try await wdk.getAddress(network: "ethereum")
 print("Address: \(address)")
 
 // Get balance
 let balance = try await wdk.getBalance(network: "ethereum")
 print("Balance: \(balance)")
-```
-
-### Recover from Mnemonic
-
-```swift
-let wdk = WdkSwiftCore()
-
-// Convert mnemonic to encrypted seed
-let mnemonic = "your twelve word mnemonic phrase here..."
-let seedData = try await wdk.getSeedAndEntropyFromMnemonic(mnemonic: mnemonic)
-
-// Initialize with recovered seed
-try await wdk.initializeWDK(
-    encryptionKey: seedData.encryptionKey,
-    encryptedSeed: seedData.encryptedSeedBuffer,
-    config: config
-)
-```
-
-### Custom Worklet Bundles
-
-You can provide your own worklet bundle for custom functionality:
-
-**Option 1: Add bundle to your app's main bundle**
-
-1. Add your custom `.bundle` file to your Xcode project
-2. Initialize with the bundle name:
-
-```swift
-let wdk = WdkSwiftCore(bundleName: "my-custom-worklet")
-```
-
-**Option 2: Provide explicit path**
-
-```swift
-let bundlePath = "/path/to/my-worklet.bundle"
-let wdk = WdkSwiftCore(
-    bundleName: "my-worklet",
-    bundlePath: bundlePath
-)
-```
-
-The bundle loading follows this priority:
-1. Explicit `bundlePath` parameter (highest priority)
-2. Auto-detect in `Bundle.main` (for custom bundles)
-3. Fallback to package's included bundle
-
-### Advanced Operations
-
-```swift
-// Call custom methods on accounts
-let result = try await wdk.callMethod(
-    methodName: "signTransaction",
-    network: "ethereum",
-    accountIndex: 0,
-    args: #"{"to": "0x...", "value": "1000000000000000000"}"#,
-    options: #"{"gasLimit": "21000"}"#
-)
-
-// Register additional wallets
-let blockchains = try await wdk.registerWallet(config: additionalWalletConfig)
-
-// Register protocols
-try await wdk.registerProtocol(config: protocolConfig)
 
 // Clean up when done
 try await wdk.dispose()
@@ -169,201 +82,88 @@ try await wdk.dispose()
 ### Initialization
 
 ```swift
-init(bundleName: String = "wdk-worklet.mobile", bundlePath: String? = nil)
+// Default: loads wdk-worklet.mobile.bundle from the app's main bundle
+let wdk = WdkSwiftCore()
+
+// Custom bundle name
+let wdk = WdkSwiftCore(bundleName: "my-custom-worklet.mobile")
+
+// Custom bundle path (for frameworks, test targets, or app extensions)
+let wdk = WdkSwiftCore(bundlePath: "/path/to/wdk-worklet.mobile.bundle")
 ```
 
-### Mnemonic & Seed Management
+### Wallet Lifecycle
 
-- `generateEntropyAndEncrypt(wordCount: Int) async throws -> EntropyResult`
-- `getMnemonicFromEntropy(encryptedEntropy: String, encryptionKey: String) async throws -> String`
-- `getSeedAndEntropyFromMnemonic(mnemonic: String) async throws -> SeedAndEntropyResult`
+| Method                                                    | Description                                                           |
+| --------------------------------------------------------- | --------------------------------------------------------------------- |
+| `generateEntropyAndEncrypt(wordCount:)`                   | Generate a new mnemonic (12 or 24 words) and return encrypted entropy |
+| `getMnemonicFromEntropy(encryptedEntropy:encryptionKey:)` | Decrypt entropy to get the mnemonic phrase                            |
+| `getSeedAndEntropyFromMnemonic(mnemonic:)`                | Convert an existing mnemonic to encrypted seed + entropy              |
+| `initializeWDK(encryptionKey:encryptedSeed:config:)`      | Initialize WDK with keys and network configuration                    |
+| `dispose()`                                               | Clean up all resources                                                |
 
-### WDK Operations
+### Account Operations
 
-- `initializeWDK(encryptionKey: String, encryptedSeed: String, config: String) async throws`
-- `callMethod(methodName: String, network: String, accountIndex: Int, args: String?, options: String?) async throws -> Any`
-- `registerWallet(config: String) async throws -> [String]`
-- `registerProtocol(config: String) async throws`
-- `dispose() async throws`
+| Method                                                      | Description                           |
+| ----------------------------------------------------------- | ------------------------------------- |
+| `getAddress(network:accountIndex:)`                         | Get the account address for a network |
+| `getBalance(network:accountIndex:)`                         | Get the account balance for a network |
+| `callMethod(methodName:network:accountIndex:args:options:)` | Call any WDK method on an account     |
 
-### Convenience Methods
+### Dynamic Registration
 
-- `getAddress(network: String, accountIndex: Int = 0) async throws -> String`
-- `getBalance(network: String, accountIndex: Int = 0) async throws -> String`
-
-## Development
-
-### Prerequisites
-
-- Xcode 15+ with Swift 6.2+
-- macOS 12+ (for testing)
-- Node.js 20+
-- npm
-
-### Local Setup
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/tetherto/wdk-swift-core.git
-   cd wdk-swift-core
-   ```
-
-2. Setup BareKit framework for testing:
-   ```bash
-   ./Scripts/setup-barekit.sh
-   ```
-
-3. Generate macOS test bundle:
-   ```bash
-   ./Scripts/generate-macos-bundle.sh
-   ```
-
-4. Run tests:
-   ```bash
-   swift test
-   ```
-
-### Project Structure
-
-```
-wdk-swift-core/
-├── Sources/WdkSwiftCore/        # Swift library code
-│   ├── WdkSwiftCore.swift       # Main API
-│   ├── WdkError.swift           # Error types
-│   └── WdkTypes.swift           # Data types
-├── Tests/WdkSwiftCoreTests/     # SPM tests (run on macOS)
-├── WorkletSource/               # JavaScript worklet source (excluded from SPM)
-│   └── pear-wrk-wdk-jsonrpc/    # WDK JSON-RPC worklet
-├── Scripts/                     # Build and setup scripts
-│   ├── generate-macos-bundle.sh # Generate macOS bundle for testing
-│   ├── generate-ios-bundle.sh   # Generate iOS bundles for releases
-│   └── setup-barekit.sh         # Download BareKit framework
-└── .github/workflows/           # CI/CD pipelines
-```
-
-### Rebuilding Worklet Bundles
-
-To modify the JavaScript worklet:
-
-1. Navigate to worklet source:
-   ```bash
-   cd WorkletSource/pear-wrk-wdk-jsonrpc
-   ```
-
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Make changes to source files in `src/`
-
-4. Rebuild macOS bundle for testing:
-   ```bash
-   cd ../..
-   ./Scripts/generate-macos-bundle.sh
-   ```
-
-5. Test your changes:
-   ```bash
-   swift test
-   ```
-
-6. For iOS bundles (usually done by CI):
-   ```bash
-   ./Scripts/generate-ios-bundle.sh
-   ```
-
-### Testing
-
-Tests use macOS bundles generated locally via `generate-macos-bundle.sh`. iOS integration testing is done in the separate [wdk-starter-swift](https://github.com/tetherto/wdk-starter-swift) repository.
-
-```bash
-# Run all tests
-swift test
-
-# Run specific test
-swift test --filter testGenerateEntropyAndEncrypt
-```
-
-## Release Process
-
-1. Update version numbers and create a git tag
-2. Create a GitHub release
-3. CI automatically:
-   - Builds iOS bundles and frameworks
-   - Creates `prebuilds.zip`
-   - Uploads as release asset
-   - Lists included frameworks in release notes
-
-Users download `prebuilds.zip` from the release page and add frameworks to their Xcode projects.
-
-## Architecture
-
-WdkSwiftCore uses a worklet-based architecture for security and isolation:
-
-```
-┌─────────────────────┐
-│   iOS/macOS App     │
-│                     │
-│  ┌──────────────┐   │
-│  │ WdkSwiftCore │   │
-│  └──────┬───────┘   │
-│         │ IPC       │
-│  ┌──────▼───────┐   │
-│  │   BareKit    │   │
-│  │   Worklet    │   │
-│  └──────────────┘   │
-│         │           │
-│  ┌──────▼───────┐   │
-│  │ WDK JS Core  │   │
-│  └──────────────┘   │
-└─────────────────────┘
-```
-
-- **WdkSwiftCore**: Swift API layer with async/await interface
-- **IPC Layer**: JSON-RPC 2.0 with length-prefixed framing
-- **BareKit Worklet**: Isolated JavaScript runtime
-- **WDK Core**: JavaScript wallet implementation
+| Method                      | Description                                 |
+| --------------------------- | ------------------------------------------- |
+| `registerWallet(config:)`   | Register additional wallet types at runtime |
+| `registerProtocol(config:)` | Register additional protocols at runtime    |
 
 ## Error Handling
 
+All methods throw `WDKError` with the following cases:
+
 ```swift
-do {
-    let result = try await wdk.getAddress(network: "ethereum")
-    print(result)
-} catch WDKError.bundleNotFound(let message) {
-    print("Bundle error: \(message)")
-} catch WDKError.rpcError(let code, let message) {
-    print("RPC error [\(code)]: \(message)")
-} catch WDKError.ipcError(let message) {
-    print("IPC error: \(message)")
-} catch {
-    print("Unexpected error: \(error)")
+public enum WDKError: Error {
+    case ipcError(String)           // Communication failure with the worklet
+    case rpcError(code: String, message: String)  // Error returned by the WDK worklet
+    case invalidResponse(String)    // Unexpected response format
+    case bundleNotFound(String)     // Worklet bundle not found in the app
 }
 ```
 
-## Contributing
+## Custom Worklet Bundle
 
-Contributions are welcome! Please:
+If you need a custom worklet with different WDK modules or network configurations:
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with tests
-4. Submit a pull request
+1. Clone the [pear-wrk-wdk-jsonrpc](https://github.com/claudiovb/pear-wrk-wdk-jsonrpc) repo
+2. Modify `package.json` dependencies and `src/` as needed
+3. Run `npm install && npm run build:bundle` to generate your custom bundle
+4. Replace `wdk-worklet.mobile.bundle` in your Xcode project with your custom build
 
-For major changes, please open an issue first to discuss what you'd like to change.
+## Architecture
+
+```
+Your App
+  |
+  |-- WdkSwiftCore (Swift, async/await API)
+  |     |
+  |     |-- JSON-RPC 2.0 over length-prefixed IPC
+  |     |
+  |     '-- BareKit (Worklet + IPC)
+  |           |
+  |           |-- wdk-worklet.mobile.bundle (JavaScript worklet)
+  |           |
+  |           '-- 17 native addon xcframeworks
+  |                 (crypto, networking, filesystem, etc.)
+  |
+  '-- BareKit.xcframework (Bare runtime)
+```
+
+## Requirements
+
+- iOS 14.0+ / macOS 11.0+
+- Swift 5.9+
+- Xcode 15.0+
 
 ## License
 
 Apache-2.0
-
-## Links
-
-- [WDK Documentation](https://github.com/tetherto/wdk)
-- [BareKit](https://github.com/holepunchto/bare-kit)
-- [Example iOS App](https://github.com/tetherto/wdk-starter-swift)
-
-## Support
-
-- Issues: [GitHub Issues](https://github.com/tetherto/wdk-swift-core/issues)
-- Discussions: [GitHub Discussions](https://github.com/tetherto/wdk-swift-core/discussions)
