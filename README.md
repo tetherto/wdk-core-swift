@@ -2,7 +2,7 @@
 
 A Swift Package for the [Tether WDK](https://github.com/Tetherto/wdk) (Wallet Development Kit). Provides a clean async/await API for wallet operations, key management, and multi-chain interactions on iOS and macOS.
 
-Supported networks: Ethereum, Polygon, Arbitrum, Sepolia, Solana, and ERC-4337.
+Supported networks: EVM (Ethereum, Polygon, Arbitrum, Sepolia and etc), Bitcoin, Solana, and ERC-4337.
 
 ## Integration Guide
 
@@ -14,12 +14,21 @@ This gives you the `WdkSwiftCore` Swift API.
 
 ### Step 2 -- Download Release Artifacts
 
-Download `prebuilds.zip` and `addons.zip` from the [latest release](https://github.com/claudiovb/pear-wrk-wdk-jsonrpc/releases/latest).
+Download the platform-specific artifacts from the [latest release](https://github.com/claudiovb/pear-wrk-wdk-jsonrpc/releases/latest).
+
+**iOS:**
 
 | File            | Contents                                                                |
 | --------------- | ----------------------------------------------------------------------- |
 | `prebuilds.zip` | `BareKit.xcframework` (runtime) + `wdk-worklet.mobile.bundle` (worklet) |
 | `addons.zip`    | 17 native addon xcframeworks required by the Bare runtime               |
+
+**macOS:**
+
+| File                  | Contents                                                               |
+| --------------------- | ---------------------------------------------------------------------- |
+| `macos-prebuilds.zip` | `BareKit.xcframework` (runtime) + `wdk-worklet.macos.bundle` (worklet) |
+| `macos-addons.zip`    | 17 native addon xcframeworks required by the Bare runtime              |
 
 ### Step 3 -- Add to Xcode Project
 
@@ -55,7 +64,10 @@ print("Backup phrase: \(mnemonic)")
 let config = """
 {
     "networks": {
-        "ethereum": { "rpcUrl": "https://eth-mainnet.example.com" }
+        "ethereum": {
+            "blockchain": "ethereum",
+            "config": { "chainId": 1, "rpcUrl": "https://eth-mainnet.example.com" }
+        }
     }
 }
 """

@@ -21,3 +21,6 @@ Tests/**/*.framework
 
 #Local scripts
 *.local.sh
+
+# Cursor
+.cursor/

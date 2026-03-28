@@ -11,6 +11,24 @@ import BareKit
 
 @Test("Basic test without BareKit")
 func testBasic() {
+    let cwd = FileManager.default.currentDirectoryPath
+    print("CWD: \(cwd)")
+    
+    let fm = FileManager.default
+    let frameworks = (try? fm.contentsOfDirectory(atPath: cwd))?.filter { $0.hasSuffix(".framework") }
+    print("Frameworks in CWD: \(frameworks ?? [])")
+    
+    // Check if bare-crypto exists
+    let cryptoPath = "\(cwd)/bare-crypto-1.13.3.framework"
+    let cryptoExists = fm.fileExists(atPath: cryptoPath)
+    print("bare-crypto-1.13.3.framework exists: \(cryptoExists)")
+    
+    if cryptoExists {
+        let binaryPath = "\(cryptoPath)/bare-crypto-1.13.3"
+        let binaryExists = fm.fileExists(atPath: binaryPath)
+        print("  binary exists: \(binaryExists)")
+    }
+    
     let x = 1 + 1
     #expect(x == 2)
 }
@@ -120,7 +138,10 @@ func testBundleNotFound() async {
 
 @Test("Minimal WDK bundle load", .timeLimit(.minutes(1)))
 func testMinimalWDKBundleLoad() async throws {
+    print("generating bundle path")
     let wdk = WdkSwiftCore()
+    print("generated bundle")
+    print("CWD: \(FileManager.default.currentDirectoryPath)")
     let result = try await wdk.generateEntropyAndEncrypt(wordCount: 12)
     #expect(!result.encryptionKey.isEmpty)
 }
@@ -241,7 +262,7 @@ struct WDKOperationTests {
         let config = """
         {
           "networks": {
-            "ethereum": { "chainId": 1 }
+            "ethereum": { "blockchain": "ethereum", "config": { "chainId": 1 } }
           }
         }
         """
@@ -261,8 +282,8 @@ struct WDKOperationTests {
         let config = """
         {
           "networks": {
-            "ethereum": { "chainId": 1 },
-            "polygon": { "chainId": 137 }
+            "ethereum": { "blockchain": "ethereum", "config": { "chainId": 1 } },
+            "polygon": { "blockchain": "ethereum", "config": { "chainId": 137 } }
           }
         }
         """
@@ -282,7 +303,7 @@ struct WDKOperationTests {
         let config = """
         {
           "networks": {
-            "ethereum": { "chainId": 1 }
+            "ethereum": { "blockchain": "ethereum", "config": { "chainId": 1 } }
           }
         }
         """
@@ -307,7 +328,7 @@ struct WDKOperationTests {
         let config = """
         {
           "networks": {
-            "ethereum": { "chainId": 1 }
+            "ethereum": { "blockchain": "ethereum", "config": { "chainId": 1 } }
           }
         }
         """
@@ -334,7 +355,7 @@ struct WDKOperationTests {
         let config = """
         {
           "networks": {
-            "ethereum": { "chainId": 1 }
+            "ethereum": { "blockchain": "ethereum", "config": { "chainId": 1 } }
           }
         }
         """
@@ -369,8 +390,8 @@ struct WDKOperationTests {
         {
           "networks": {
             "ethereum": {
-              "chainId": 1,
-              "rpcUrl": "https://eth.llamarpc.com"
+              "blockchain": "ethereum",
+              "config": { "chainId": 1, "rpcUrl": "https://eth.llamarpc.com" }
             }
           }
         }
@@ -425,7 +446,7 @@ struct WDKOperationTests {
         let config = """
         {
           "networks": {
-            "ethereum": { "chainId": 1 }
+            "ethereum": { "blockchain": "ethereum", "config": { "chainId": 1 } }
           }
         }
         """
@@ -447,8 +468,8 @@ struct WDKOperationTests {
         let config = """
         {
           "networks": {
-            "ethereum": { "chainId": 1 },
-            "polygon": { "chainId": 137 }
+            "ethereum": { "blockchain": "ethereum", "config": { "chainId": 1 } },
+            "polygon": { "blockchain": "ethereum", "config": { "chainId": 137 } }
           }
         }
         """
