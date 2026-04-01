@@ -7,33 +7,7 @@ import BareKit
 /// These tests require a macOS bundle to be generated first using:
 /// ./Scripts/generate-macos-bundle.sh
 
-// MARK: - Basic Tests
-
-@Test("Basic test without BareKit")
-func testBasic() {
-    let cwd = FileManager.default.currentDirectoryPath
-    print("CWD: \(cwd)")
-    
-    let fm = FileManager.default
-    let frameworks = (try? fm.contentsOfDirectory(atPath: cwd))?.filter { $0.hasSuffix(".framework") }
-    print("Frameworks in CWD: \(frameworks ?? [])")
-    
-    // Check if bare-crypto exists
-    let cryptoPath = "\(cwd)/bare-crypto-1.13.3.framework"
-    let cryptoExists = fm.fileExists(atPath: cryptoPath)
-    print("bare-crypto-1.13.3.framework exists: \(cryptoExists)")
-    
-    if cryptoExists {
-        let binaryPath = "\(cryptoPath)/bare-crypto-1.13.3"
-        let binaryExists = fm.fileExists(atPath: binaryPath)
-        print("  binary exists: \(binaryExists)")
-    }
-    
-    let x = 1 + 1
-    #expect(x == 2)
-}
-
-// MARK: - IPC Diagnostic
+// MARK: - IPC Tests
 
 @Test("IPC echo with simple JS", .timeLimit(.minutes(1)))
 func testIPCEchoSimple() async throws {
@@ -134,14 +108,11 @@ func testBundleNotFound() async {
     }
 }
 
-// MARK: - Minimal WDK Test (diagnostic)
+// MARK: - Standalone WDK Test
 
 @Test("Minimal WDK bundle load", .timeLimit(.minutes(1)))
 func testMinimalWDKBundleLoad() async throws {
-    print("generating bundle path")
     let wdk = WdkSwiftCore()
-    print("generated bundle")
-    print("CWD: \(FileManager.default.currentDirectoryPath)")
     let result = try await wdk.generateEntropyAndEncrypt(wordCount: 12)
     #expect(!result.encryptionKey.isEmpty)
 }
@@ -409,8 +380,7 @@ struct WDKOperationTests {
             #expect(!balance.isEmpty)
             #expect(balance == "0" || Double(balance) != nil || balance.contains("e"))
         } catch {
-            // Network errors are acceptable in tests
-            print("Note: Balance query failed (expected without network): \(error)")
+            // Network errors are acceptable in CI (no RPC endpoint)
         }
     }
 
@@ -436,28 +406,6 @@ struct WDKOperationTests {
         } catch {
             Issue.record("Unexpected error type: \(error)")
         }
-    }
-
-    @Test("Dispose cleans up resources")
-    func testDispose() async throws {
-        let wdk = WDKOperationTests.wdk
-        let entropy = try await wdk.generateEntropyAndEncrypt(wordCount: 12)
-
-        let config = """
-        {
-          "networks": {
-            "ethereum": { "blockchain": "ethereum", "config": { "chainId": 1 } }
-          }
-        }
-        """
-
-        try await wdk.initializeWDK(
-            encryptionKey: entropy.encryptionKey,
-            encryptedSeed: entropy.encryptedSeedBuffer,
-            config: config
-        )
-
-        try await wdk.dispose()
     }
 
     @Test("Concurrent calls return correct responses", .timeLimit(.minutes(2)))
@@ -523,5 +471,27 @@ struct WDKOperationTests {
         #expect(results.0.encryptionKey != results.1.encryptionKey)
         #expect(results.1.encryptionKey != results.2.encryptionKey)
         #expect(results.0.encryptionKey != results.2.encryptionKey)
+    }
+
+    @Test("Dispose cleans up resources")
+    func testDispose() async throws {
+        let wdk = WDKOperationTests.wdk
+        let entropy = try await wdk.generateEntropyAndEncrypt(wordCount: 12)
+
+        let config = """
+        {
+          "networks": {
+            "ethereum": { "blockchain": "ethereum", "config": { "chainId": 1 } }
+          }
+        }
+        """
+
+        try await wdk.initializeWDK(
+            encryptionKey: entropy.encryptionKey,
+            encryptedSeed: entropy.encryptedSeedBuffer,
+            config: config
+        )
+
+        try await wdk.dispose()
     }
 }
