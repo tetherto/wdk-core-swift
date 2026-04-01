@@ -2,43 +2,109 @@
 
 A Swift Package for the [Tether WDK](https://github.com/Tetherto/wdk) (Wallet Development Kit). Provides a clean async/await API for wallet operations, key management, and multi-chain interactions on iOS and macOS.
 
-Supported networks: EVM (Ethereum, Polygon, Arbitrum, Sepolia and etc), Bitcoin, Solana, and ERC-4337.
+Supported networks: EVM (Ethereum, Polygon, Arbitrum, Sepolia, etc.), Bitcoin, Solana, and ERC-4337.
 
 ## Integration Guide
 
-### Step 1 -- Add the SPM Package
+### Step 1 — Add the SPM Package
 
 In Xcode: **File > Add Package Dependencies** and enter this repository URL.
 
 This gives you the `WdkSwiftCore` Swift API.
 
-### Step 2 -- Download Release Artifacts
+### Step 2 — Obtain the Runtime Artifacts
 
-Download the platform-specific artifacts from the [latest release](https://github.com/claudiovb/pear-wrk-wdk-jsonrpc/releases/latest).
+You need three things alongside `WdkSwiftCore`:
+
+| Artifact                      | What it is                                                              |
+| ----------------------------- | ----------------------------------------------------------------------- |
+| **BareKit.xcframework**       | The Bare runtime that hosts the JavaScript worklet                      |
+| **Worklet bundle**            | `wdk-worklet.mobile.bundle` (iOS) or `wdk-worklet.macos.bundle` (macOS) |
+| **Native addon xcframeworks** | ~18 xcframeworks for crypto, networking, filesystem, etc.               |
+
+Choose **one** of the two options below to obtain them.
+
+---
+
+#### Option A — WDK Worklet Bundler (recommended)
+
+Use the [`wdk-worklet-bundler`](https://github.com/claudiovb/wdk-worklet-bundler/tree/feat/jsonrpc) CLI to generate the worklet bundle, link native addons, and produce an `addons.yml` — all in one step.
+
+1. Install the bundler:
+
+```bash
+npm install -g @tetherto/wdk-worklet-bundler
+```
+
+2. Create a `wdk.config.js` in a working directory:
+
+```js
+module.exports = {
+  transport: "jsonrpc",
+  networks: {
+    ethereum: { package: "@tetherto/wdk-wallet-evm" },
+    bitcoin: { package: "@tetherto/wdk-wallet-btc" },
+  },
+  options: {
+    platforms: ["ios"], // or ["ios", "macos"]
+  },
+  output: {
+    bundle: "./.wdk-bundle/wdk-worklet.mobile.bundle",
+  },
+};
+```
+
+3. Generate:
+
+```bash
+wdk-worklet-bundler generate --install
+```
+
+This produces:
+
+- The worklet bundle at the configured output path
+- Native addon xcframeworks in `ios-addons/` (or `mac-addons/`)
+- An `addons.yml` for BareKit/XcodeGen integration
+
+4. Download **BareKit.xcframework** from [bare-kit releases](https://github.com/holepunchto/bare-kit/releases).
+
+5. Continue to **Step 3** below to add everything to your Xcode project.
+
+> See the [bundler README](https://github.com/claudiovb/wdk-worklet-bundler/tree/feat/jsonrpc) for the full configuration reference and advanced options.
+
+---
+
+#### Option B — Pre-built Releases
+
+Download pre-built artifacts from the [pear-wrk-wdk-jsonrpc releases](https://github.com/claudiovb/pear-wrk-wdk-jsonrpc/releases/latest).
 
 **iOS:**
 
-| File            | Contents                                                                |
-| --------------- | ----------------------------------------------------------------------- |
-| `prebuilds.zip` | `BareKit.xcframework` (runtime) + `wdk-worklet.mobile.bundle` (worklet) |
-| `addons.zip`    | 17 native addon xcframeworks required by the Bare runtime               |
+| File            | Contents                              |
+| --------------- | ------------------------------------- |
+| `prebuilds.zip` | `wdk-worklet.mobile.bundle` (worklet) |
+| `addons.zip`    | ~18 native addon xcframeworks         |
 
 **macOS:**
 
-| File                  | Contents                                                               |
-| --------------------- | ---------------------------------------------------------------------- |
-| `macos-prebuilds.zip` | `BareKit.xcframework` (runtime) + `wdk-worklet.macos.bundle` (worklet) |
-| `macos-addons.zip`    | 17 native addon xcframeworks required by the Bare runtime              |
+| File                  | Contents                             |
+| --------------------- | ------------------------------------ |
+| `macos-prebuilds.zip` | `wdk-worklet.macos.bundle` (worklet) |
+| `macos-addons.zip`    | ~18 native addon xcframeworks        |
 
-### Step 3 -- Add to Xcode Project
+> **Note:** `BareKit.xcframework` is **not** included in these releases. Download it separately from [bare-kit releases](https://github.com/holepunchto/bare-kit/releases).
 
-1. **BareKit.xcframework** -- Drag into your Xcode project. In your target's **General > Frameworks, Libraries, and Embedded Content**, set it to **Embed & Sign**.
+---
 
-2. **wdk-worklet.mobile.bundle** -- Drag into your Xcode project navigator. Ensure it appears in your target's **Build Phases > Copy Bundle Resources**.
+### Step 3 — Add to Xcode Project
 
-3. **17 addon xcframeworks** -- Drag all xcframeworks from the unzipped `addons.zip` into your project. Add them to **Frameworks, Libraries, and Embedded Content** with **Embed & Sign**.
+1. **BareKit.xcframework** — Drag into your Xcode project. In your target's **General > Frameworks, Libraries, and Embedded Content**, set it to **Embed & Sign**.
 
-   If using XcodeGen, an `addons.yml` is included in `addons.zip` that you can include in your `project.yml`.
+2. **Worklet bundle** (`wdk-worklet.mobile.bundle` or `wdk-worklet.macos.bundle`) — Drag into your Xcode project navigator. Ensure it appears in your target's **Build Phases > Copy Bundle Resources**.
+
+3. **Addon xcframeworks** — Drag all xcframeworks into your project. Add them to **Frameworks, Libraries, and Embedded Content** with **Embed & Sign**.
+
+   If using XcodeGen, an `addons.yml` is included (generated by the bundler or shipped in the addons zip) that you can include in your `project.yml`.
 
 Build and run.
 
@@ -94,11 +160,13 @@ try await wdk.dispose()
 ### Initialization
 
 ```swift
-// Default: loads wdk-worklet.mobile.bundle from the app's main bundle
+// Default: auto-detects platform bundle
+//   macOS → wdk-worklet.macos.bundle
+//   iOS   → wdk-worklet.mobile.bundle
 let wdk = WdkSwiftCore()
 
 // Custom bundle name
-let wdk = WdkSwiftCore(bundleName: "my-custom-worklet.mobile")
+let wdk = WdkSwiftCore(bundleName: "my-custom-worklet")
 
 // Custom bundle path (for frameworks, test targets, or app extensions)
 let wdk = WdkSwiftCore(bundlePath: "/path/to/wdk-worklet.mobile.bundle")
@@ -135,39 +203,30 @@ All methods throw `WDKError` with the following cases:
 
 ```swift
 public enum WDKError: Error {
-    case ipcError(String)           // Communication failure with the worklet
-    case rpcError(code: String, message: String)  // Error returned by the WDK worklet
-    case invalidResponse(String)    // Unexpected response format
-    case bundleNotFound(String)     // Worklet bundle not found in the app
+    case ipcError(String)
+    case rpcError(code: String, message: String)
+    case invalidResponse(String)
+    case bundleNotFound(String)
 }
 ```
-
-## Custom Worklet Bundle
-
-If you need a custom worklet with different WDK modules or network configurations:
-
-1. Clone the [pear-wrk-wdk-jsonrpc](https://github.com/claudiovb/pear-wrk-wdk-jsonrpc) repo
-2. Modify `package.json` dependencies and `src/` as needed
-3. Run `npm install && npm run build:bundle` to generate your custom bundle
-4. Replace `wdk-worklet.mobile.bundle` in your Xcode project with your custom build
 
 ## Architecture
 
 ```
 Your App
-  |
-  |-- WdkSwiftCore (Swift, async/await API)
-  |     |
-  |     |-- JSON-RPC 2.0 over length-prefixed IPC
-  |     |
-  |     '-- BareKit (Worklet + IPC)
-  |           |
-  |           |-- wdk-worklet.mobile.bundle (JavaScript worklet)
-  |           |
-  |           '-- 17 native addon xcframeworks
-  |                 (crypto, networking, filesystem, etc.)
-  |
-  '-- BareKit.xcframework (Bare runtime)
+  │
+  ├── WdkSwiftCore (Swift, async/await API)
+  │     │
+  │     ├── JSON-RPC 2.0 over length-prefixed IPC
+  │     │
+  │     └── BareKit (Worklet + IPC)
+  │           │
+  │           ├── wdk-worklet.{mobile,macos}.bundle (JavaScript worklet)
+  │           │
+  │           └── ~17 native addon xcframeworks
+  │                 (crypto, networking, filesystem, etc.)
+  │
+  └── BareKit.xcframework (Bare runtime — from holepunchto/bare-kit)
 ```
 
 ## Requirements
