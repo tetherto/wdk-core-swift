@@ -254,7 +254,7 @@ struct WDKOperationTests {
         {
           "networks": {
             "ethereum": { "blockchain": "ethereum", "config": { "chainId": 1 } },
-            "polygon": { "blockchain": "ethereum", "config": { "chainId": 137 } }
+            "polygon": { "blockchain": "polygon", "config": { "chainId": 137 } }
           }
         }
         """
@@ -417,7 +417,7 @@ struct WDKOperationTests {
         {
           "networks": {
             "ethereum": { "blockchain": "ethereum", "config": { "chainId": 1 } },
-            "polygon": { "blockchain": "ethereum", "config": { "chainId": 137 } }
+            "polygon": { "blockchain": "polygon", "config": { "chainId": 137 } }
           }
         }
         """
