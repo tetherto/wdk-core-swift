@@ -458,9 +458,20 @@ public class WdkSwiftCore {
         ])
     }
 
-    /// Dispose the WDK instance and clean up resources
-    public func dispose() async throws {
-        _ = try await call(method: "dispose", params: [:])
+    /// Dispose the WDK instance and clean up resources.
+    ///
+    /// - Parameter blockchains: The blockchains to dispose. Pass a non-empty
+    ///   array to release only those blockchains while keeping the WDK instance
+    ///   (and remaining wallets) alive. Omit (or pass an empty array) to tear
+    ///   the whole instance down. The worklet must release a blockchain before
+    ///   the same one is registered again — two live instances of the same
+    ///   blockchain cannot coexist under one runtime.
+    public func dispose(blockchains: [String] = []) async throws {
+        var params: [String: Any] = [:]
+        if !blockchains.isEmpty {
+            params["blockchains"] = blockchains
+        }
+        _ = try await call(method: "dispose", params: params)
     }
 
     // MARK: - Convenience Methods
