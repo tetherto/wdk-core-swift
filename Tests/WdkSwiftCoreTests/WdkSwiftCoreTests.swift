@@ -4,8 +4,10 @@ import BareKit
 @testable import WdkSwiftCore
 
 /// Test suite for WdkSwiftCore functionality
-/// These tests require a macOS bundle to be generated first using:
-/// ./Scripts/generate-macos-bundle.sh
+/// These tests need a macOS worklet bundle and addon frameworks under
+/// Tests/Resources/macos/ (generated with wdk-worklet-bundler, platforms: ["macos"]),
+/// prepared with ./Scripts/prepare-macos-frameworks.sh and run via
+/// ./Scripts/test-with-frameworks.sh. See "Running the Tests" in the README.
 
 // MARK: - IPC Tests
 
