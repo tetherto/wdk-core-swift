@@ -4,8 +4,10 @@ import BareKit
 @testable import WdkSwiftCore
 
 /// Test suite for WdkSwiftCore functionality
-/// These tests require a macOS bundle to be generated first using:
-/// ./Scripts/generate-macos-bundle.sh
+/// These tests need a macOS worklet bundle and addon frameworks under
+/// Tests/Resources/macos/ (generated with wdk-worklet-bundler, platforms: ["macos"]),
+/// prepared with ./Scripts/prepare-macos-frameworks.sh and run via
+/// ./Scripts/test-with-frameworks.sh. See "Running the Tests" in the README.
 
 // MARK: - IPC Tests
 
@@ -492,6 +494,38 @@ struct WDKOperationTests {
             config: config
         )
 
+        try await wdk.dispose()
+    }
+
+    @Test("Dispose specific blockchains keeps the others alive")
+    func testDisposePerBlockchain() async throws {
+        let wdk = WDKOperationTests.wdk
+        let entropy = try await wdk.generateEntropyAndEncrypt(wordCount: 12)
+
+        let config = """
+        {
+          "networks": {
+            "ethereum": { "blockchain": "ethereum", "config": { "chainId": 1 } },
+            "polygon": { "blockchain": "polygon", "config": { "chainId": 137 } }
+          }
+        }
+        """
+
+        try await wdk.initializeWDK(
+            encryptionKey: entropy.encryptionKey,
+            encryptedSeed: entropy.encryptedSeedBuffer,
+            config: config
+        )
+
+        try await wdk.dispose(blockchains: ["ethereum"])
+
+        // If the blockchains argument is not passed through to the worklet,
+        // the handler falls back to a full dispose and polygon dies with it.
+        let polygonAddress = try await wdk.getAddress(network: "polygon")
+        #expect(polygonAddress.hasPrefix("0x"))
+        #expect(polygonAddress.count == 42)
+
+        // Full teardown still works after a partial dispose.
         try await wdk.dispose()
     }
 }
