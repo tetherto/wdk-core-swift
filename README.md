@@ -50,6 +50,9 @@ module.exports = {
   },
   options: {
     platforms: ["ios"], // or ["ios", "macos"]
+    // Required for iOS/macOS: JavaScriptCore cannot load ES modules from the
+    // bundle. Without this the worklet aborts on the first ESM dependency.
+    convertEsmToCjs: true,
   },
   output: {
     bundle: "./.wdk-bundle/wdk-worklet.mobile.bundle",
@@ -271,7 +274,7 @@ Your App
 
 ## Running the Tests
 
-The test suite runs on macOS against a real worklet bundle and the addon frameworks. Generate them with the bundler using `platforms: ["macos"]` and `output.bundle: "./.wdk-bundle/wdk-worklet.macos.bundle"`, then place them where the tests expect:
+The test suite runs on macOS against a real worklet bundle and the addon frameworks. Generate them with the bundler using `platforms: ["macos"]`, `convertEsmToCjs: true`, and `output.bundle: "./.wdk-bundle/wdk-worklet.macos.bundle"`, then place them where the tests expect:
 
 ```
 Frameworks/BareKit.xcframework          # from bare-kit releases
@@ -306,7 +309,10 @@ find ios-addons -name '*.framework' -type d -exec codesign -s - --force {} \;
 xattr -dr com.apple.quarantine path/to/BareKit.xcframework
 ```
 
-**Worklet fails to boot with a signal 6 abort.** Usually one addon cannot `dlopen` a sibling. Check that every framework the bundle needs is present and, on macOS, that the rpath fix above has been applied.
+**Worklet fails to boot with a signal 6 abort.** Two common causes:
+
+- An addon cannot `dlopen` a sibling. Check that every framework the bundle needs is present and, on macOS, that the rpath fix above has been applied.
+- The bundle contains ES modules. The console shows `Uncaught (in promise) createModule@[native code]` with a `bare-module` stack ending in a `require` from the worklet, and the process aborts on the first call. JavaScriptCore cannot load ESM from the bundle; set `options.convertEsmToCjs: true` in `wdk.config.js` and regenerate.
 
 ## Requirements
 
