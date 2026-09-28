@@ -4,6 +4,8 @@ A Swift Package for the [Tether WDK](https://github.com/Tetherto/wdk) (Wallet De
 
 Supported networks: EVM (Ethereum, Polygon, Arbitrum, Sepolia, etc.), Bitcoin, Solana, and ERC-4337.
 
+For the broader WDK ecosystem, see the [WDK documentation](https://docs.wdk.tether.io/).
+
 ## Integration Guide
 
 ### Step 1 — Add the SPM Package
