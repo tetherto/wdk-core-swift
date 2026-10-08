@@ -51,7 +51,8 @@ module.exports = {
     bitcoin: { package: "@tetherto/wdk-wallet-btc" },
   },
   options: {
-    platforms: ["ios"], // or ["ios", "macos"]
+    // Platforms are derived from the targets: ios-* → ios, darwin-* → macos.
+    targets: ["ios-arm64", "ios-arm64-simulator", "ios-x64-simulator"],
     // Required for iOS/macOS: JavaScriptCore cannot load ES modules from the
     // bundle. Without this the worklet aborts on the first ESM dependency.
     convertEsmToCjs: true,
@@ -62,7 +63,16 @@ module.exports = {
 };
 ```
 
-3. Generate:
+3. Pin `bare-node-runtime` to 1.5.0 in your working directory's `package.json` (both as a dependency and under `"overrides"`):
+
+```json
+"dependencies": { "bare-node-runtime": "1.5.0" },
+"overrides": { "bare-node-runtime": "1.5.0" }
+```
+
+> `bare-node-runtime` ≥ 1.5.1 eagerly loads `bare-worker/global`, whose `BroadcastChannel` needs SharedArrayBuffer bindings the JavaScriptCore port of libjs does not implement — JSC-flavoured BareKit apps abort at boot ([bare-node-runtime#13](https://github.com/holepunchto/bare-node-runtime/issues/13), closed not-planned).
+
+4. Generate:
 
 ```bash
 wdk-worklet-bundler generate --install
@@ -76,9 +86,9 @@ This produces:
 
 The set of addons is not fixed: the bundler links one xcframework per native dependency pulled in by the wallet and protocol packages in your `wdk.config.js`, so the count varies with the networks you enable.
 
-4. Download **BareKit.xcframework** from [bare-kit releases](https://github.com/holepunchto/bare-kit/releases).
+5. Download **BareKit.xcframework** from [bare-kit releases](https://github.com/holepunchto/bare-kit/releases).
 
-5. Continue to **Step 3** below to add everything to your project.
+6. Continue to **Step 3** below to add everything to your project.
 
 > See the [bundler README](https://github.com/tetherto/wdk-worklet-bundler#quick-start--swift--kotlin-json-rpc) for the full configuration reference and advanced options.
 
@@ -276,7 +286,7 @@ Your App
 
 ## Running the Tests
 
-The test suite runs on macOS against a real worklet bundle and the addon frameworks. Generate them with the bundler using `platforms: ["macos"]`, `convertEsmToCjs: true`, and `output.bundle: "./.wdk-bundle/wdk-worklet.macos.bundle"`, then place them where the tests expect:
+The test suite runs on macOS against a real worklet bundle and the addon frameworks. Generate them with the bundler using `targets: ["darwin-arm64", "darwin-x64"]` (platforms are derived from the targets — the `platforms` option was removed), `convertEsmToCjs: true`, and `output.bundle: "./.wdk-bundle/wdk-worklet.macos.bundle"`, then place them where the tests expect:
 
 ```
 Frameworks/BareKit.xcframework          # from bare-kit releases
