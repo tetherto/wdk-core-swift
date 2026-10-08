@@ -293,6 +293,12 @@ Then prepare the frameworks and run the suite:
 
 The first script adds the rpaths sibling addons need to load each other and re-signs them (see [Troubleshooting](#troubleshooting)). It resolves paths relative to the repository root, so it can be called from anywhere. The second symlinks the addon frameworks into the working directory so the Bare runtime can `dlopen` them, and cleans up afterwards. All of these paths are git-ignored.
 
+The test helper refuses to overwrite existing framework paths and removes only the links it creates. To check its cleanup behavior without downloading runtime artifacts:
+
+```bash
+bash Scripts/test-framework-cleanup.sh
+```
+
 ## Troubleshooting
 
 **Xcode refuses the addon frameworks with a code signature error.** Frameworks copied or dragged out of the bundler output lose their signature, and `install_name_tool` invalidates it too. Re-sign them ad hoc:
