@@ -9,31 +9,23 @@ FRAMEWORK_DIR="Tests/Resources/macos/Frameworks"
 BUILD_DIR=".build/arm64-apple-macosx/debug"
 BAREKIT_FW="Frameworks/BareKit.xcframework/macos-arm64_x86_64"
 
-# Remove only links created by this invocation, if they still point to our addon.
+# Track the temporary framework links owned by this run.
 linked_frameworks=()
 cleanup() {
-  for fw in "${linked_frameworks[@]}"; do
-    link="${fw##*/}"
-    if [ -L "$link" ] && [ "$(readlink "$link")" = "$fw" ]; then
-      rm -f -- "$link"
-    fi
+  for link in "${linked_frameworks[@]}"; do
+    rm -f -- "$link"
   done
+  echo "Removed ${#linked_frameworks[@]} temporary framework links"
 }
 trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
 # Regenerate root symlinks so dlopen() can resolve addon frameworks from CWD.
 # bare runtime calls dlopen("name.framework/name", RTLD_LAZY) with a relative
 # path, which resolves from the process CWD (= project root during swift test).
 for fw in "$FRAMEWORK_DIR"/bare-*.framework "$FRAMEWORK_DIR"/sodium-*.framework; do
   [ -d "$fw" ] || continue
   link="${fw##*/}"
-  if [ -e "$link" ] || [ -L "$link" ]; then
-    echo "Error: refusing to overwrite existing framework path: $link" >&2
-    exit 1
-  fi
-  ln -s "$fw" "$link"
-  linked_frameworks+=("$fw")
+  ln -sfn "$fw" "$link"
+  linked_frameworks+=("$link")
 done
 
 # Copy BareKit.framework to the build directory so the test bundle
