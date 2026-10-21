@@ -29,6 +29,14 @@ You need three things alongside `WdkSwiftCore`:
 
 Generate them with the bundler as described below.
 
+In a project that has a `wdk.config.js`, `Scripts/wdk-setup.js` automates this step for iOS: it installs the bundler, generates the bundle and addons, downloads BareKit, and writes a local Swift package (`.wdk-runtime`) holding BareKit and the addons, which you add to your project as a local package dependency.
+
+```bash
+node Scripts/wdk-setup.js --platform ios
+```
+
+Add `--engine v8` for iOS 26 devices: the JavaScriptCore build (the default) is reported to fail there.
+
 ---
 
 #### WDK Worklet Bundler
@@ -150,7 +158,7 @@ Include `OS=` (or use `id=<udid>`) in the destination when several simulators sh
 
 [**wdk-starter-swift**](https://github.com/Tetherto/wdk-starter-swift) is a minimal iOS app that integrates `WdkSwiftCore` end to end: create or import a wallet, derive Ethereum (Sepolia) and Bitcoin addresses, fetch balances, call arbitrary WDK methods, and dispose.
 
-It follows the XcodeGen flow described above, so it does not depend on the Xcode IDE. The project was developed and built using only the Xcode Command Line Tools and VS Code — `xcodegen generate` followed by `xcodebuild` for a simulator destination — and it can equally be opened in Xcode. That command-line path was last verified against this package's `main` with Xcode 26.6 and XcodeGen 2.44 (build, install, and a create-wallet / addresses / balances / dispose run on an iOS 26 simulator). Use it as a reference for the `project.yml` layout, the `addons.yml` include, and where the worklet bundle and `BareKit.xcframework` live in the tree.
+It follows the XcodeGen flow described above, so it does not depend on the Xcode IDE. The project was developed and built using only the Xcode Command Line Tools and VS Code — `xcodegen generate` followed by `xcodebuild` for a simulator destination — and it can equally be opened in Xcode. That command-line path was last verified against this package's `main` with Xcode 26.6 and XcodeGen 2.44 (build, install, and a create-wallet / addresses / balances / dispose run on an iOS 26 simulator). Use it as a reference for the `project.yml` layout and for how the setup script's `.wdk-runtime` package and the worklet bundle are wired in.
 
 ## Quick Start
 
@@ -293,6 +301,13 @@ Then prepare the frameworks and run the suite:
 
 The first script adds the rpaths sibling addons need to load each other and re-signs them (see [Troubleshooting](#troubleshooting)). It resolves paths relative to the repository root, so it can be called from anywhere. The second symlinks the addon frameworks into the working directory so the Bare runtime can `dlopen` them, and cleans up afterwards. All of these paths are git-ignored.
 
+`Scripts/wdk-setup.js` can generate and place these files in one step. It reads `wdk.config.js` as described above (the tests use the `ethereum` and `polygon` networks) and runs `prepare-macos-frameworks.sh` for you:
+
+```bash
+node Scripts/wdk-setup.js --platform macos --barekit-tag v2.3.0   # JavaScriptCore needs v2.3.0 until wdk-worklet-bundler#80 is released
+./Scripts/test-with-frameworks.sh
+```
+
 ## Troubleshooting
 
 **Xcode refuses the addon frameworks with a code signature error.** Frameworks copied or dragged out of the bundler output lose their signature, and `install_name_tool` invalidates it too. Re-sign them ad hoc:
@@ -321,6 +336,7 @@ xattr -dr com.apple.quarantine path/to/BareKit.xcframework
 - iOS 14.0+ / macOS 11.0+
 - Swift 5.9+
 - Xcode 15.0+ (the full IDE, or just the Command Line Tools plus [XcodeGen](https://github.com/yonaskolb/XcodeGen))
+- To use `Scripts/wdk-setup.js`: Node.js 18.3+ and npm. The `.wdk-runtime` package it generates takes its minimum iOS version from the frameworks it packages (15.0 today), which is higher than `WdkSwiftCore`'s own 14.0.
 
 ## License
 
