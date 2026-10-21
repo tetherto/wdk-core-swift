@@ -293,6 +293,8 @@ Then prepare the frameworks and run the suite:
 
 The first script adds the rpaths sibling addons need to load each other and re-signs them (see [Troubleshooting](#troubleshooting)). It resolves paths relative to the repository root, so it can be called from anywhere. The second symlinks the addon frameworks into the working directory so the Bare runtime can `dlopen` them, and cleans up afterwards. All of these paths are git-ignored.
 
+While it runs, the test helper owns the `bare-*.framework` and `sodium-*.framework` names in the repository root. It replaces existing links with those names and removes its temporary links afterwards. If you stage your own frameworks for testing, clean them up before running the helper.
+
 ## Troubleshooting
 
 **Xcode refuses the addon frameworks with a code signature error.** Frameworks copied or dragged out of the bundler output lose their signature, and `install_name_tool` invalidates it too. Re-sign them ad hoc:
