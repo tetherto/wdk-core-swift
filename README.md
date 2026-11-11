@@ -91,6 +91,14 @@ options:
       [ -d .wdk-core-swift/.git ] || git clone --quiet "$core_url" .wdk-core-swift
       git -C .wdk-core-swift remote set-url origin "$core_url"
       bootstrap=.wdk-core-swift/js/scripts/bootstrap-app.sh
+      if [ ! -x "$bootstrap" ]; then
+        # A clone starts on the default branch, which may not have the js/ workspace yet:
+        # move it to the requested revision before looking for the script.
+        git -C .wdk-core-swift fetch --quiet --tags origin
+        for candidate in "origin/$core_ref" "$core_ref" "v$core_ref"; do
+          git -C .wdk-core-swift checkout --quiet --detach "$candidate" 2>/dev/null && break
+        done
+      fi
       set -- --core-ref "$core_ref"
     fi
     if [ ! -x "$bootstrap" ]; then
