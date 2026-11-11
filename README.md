@@ -1,4 +1,4 @@
-# WdkSwiftCore
+# WdkCore
 
 A Swift Package for the [Tether WDK](https://github.com/Tetherto/wdk) (Wallet Development Kit). Provides a clean async/await API for wallet operations, key management, and multi-chain interactions on iOS and macOS.
 
@@ -6,116 +6,107 @@ Supported networks: EVM (Ethereum, Polygon, Arbitrum, Sepolia, etc.), Bitcoin, S
 
 For the broader WDK ecosystem, see the [WDK documentation](https://docs.wdk.tether.io/).
 
+> **Renamed from `WdkSwiftCore`.** The module, the library product and the main type are now `WdkCore`, matching [`wdk-core-kotlin`](https://github.com/Tetherto/wdk-core-kotlin). To migrate, change `import WdkSwiftCore` to `import WdkCore`, `WdkSwiftCore(...)` to `WdkCore(...)`, and the product name in your project to `WdkCore`. The repository and the package URL stay `wdk-core-swift`.
+
 ## Integration Guide
 
-### Step 1 — Add the SPM Package
+`WdkCore` is a Swift package plus three runtime artifacts that live in your app:
 
-Add this repository as a Swift Package dependency:
+| Artifact                     | What it is                                                                   |
+| ---------------------------- | ---------------------------------------------------------------------------- |
+| **BareKit.xcframework**      | The Bare runtime that hosts the JavaScript worklet                           |
+| **Worklet bundle**           | `wdk-worklet.mobile.bundle` (iOS) or `wdk-worklet.macos.bundle` (macOS)      |
+| **Native addon frameworks**  | One framework per native dependency (crypto, networking, filesystem, etc.)   |
 
-- **Xcode IDE:** **File > Add Package Dependencies** and enter this repository URL.
-- **XcodeGen / command line:** declare it under `packages:` in your `project.yml` (see the [Example](#example) below).
+You describe your networks in one file, and `xcodegen generate` builds and wires everything else. The work is done by the pinned JavaScript workspace in this repository's [`js/`](js/README.md) directory, so the bundle, the addons and the Swift package always come from the same revision.
 
-This gives you the `WdkSwiftCore` Swift API.
+> **Supported stack.** BareKit **2.5.5** with the **V8** engine, `@tetherto/wdk-worklet-bundler` and `@tetherto/pear-wrk-wdk` **1.0.0-beta.17** (JSON-RPC transport), `bare-kit-swift` **1.x**. BareKit 2.5.5 is the latest BareKit this package supports. BareKit 3.x is a different distribution that needs [bare-stow](https://github.com/holepunchto/bare-stow) and arrives with the rework tracked in [tetherto/wdk-worklet-bundler#84](https://github.com/tetherto/wdk-worklet-bundler/issues/84); the setup refuses it. JavaScriptCore builds of BareKit 2.x can still be used at your own risk, see [`js/README.md`](js/README.md#javascriptcore-unsupported).
 
-### Step 2 — Obtain the Runtime Artifacts
+You need [XcodeGen](https://github.com/yonaskolb/XcodeGen) on your `PATH` (`brew install xcodegen`), Node.js `^22.21.0` or `>=24.9.0` with npm, and git.
 
-You need three things alongside `WdkSwiftCore`:
+### Step 1: Describe your networks
 
-| Artifact                      | What it is                                                              |
-| ----------------------------- | ----------------------------------------------------------------------- |
-| **BareKit.xcframework**       | The Bare runtime that hosts the JavaScript worklet                      |
-| **Worklet bundle**            | `wdk-worklet.mobile.bundle` (iOS) or `wdk-worklet.macos.bundle` (macOS) |
-| **Native addon xcframeworks** | One xcframework per native dependency (crypto, networking, filesystem, etc.) |
-
-Generate them with the bundler as described below.
-
----
-
-#### WDK Worklet Bundler
-
-Use the [`wdk-worklet-bundler`](https://github.com/tetherto/wdk-worklet-bundler) CLI to generate the worklet bundle, link native addons, and produce an `addons.yml` — all in one step.
-
-1. Install the bundler:
-
-```bash
-npm install -g @tetherto/wdk-worklet-bundler
-```
-
-2. Create a `wdk.config.js` in a working directory:
+Create `wdk.config.js` in the root of your app:
 
 ```js
 module.exports = {
-  transport: "jsonrpc",
+  transport: 'jsonrpc',
+
+  // A network name is the blockchain identifier you pass to initializeWDK() and getAddress().
   networks: {
-    ethereum: { package: "@tetherto/wdk-wallet-evm" },
-    bitcoin: { package: "@tetherto/wdk-wallet-btc" },
+    ethereum: { package: '@tetherto/wdk-wallet-evm' },
+    bitcoin: { package: '@tetherto/wdk-wallet-btc' }
   },
+
   options: {
-    platforms: ["ios"], // or ["ios", "macos"]
-    // Required for iOS/macOS: JavaScriptCore cannot load ES modules from the
-    // bundle. Without this the worklet aborts on the first ESM dependency.
-    convertEsmToCjs: true,
-  },
-  output: {
-    bundle: "./.wdk-bundle/wdk-worklet.mobile.bundle",
-  },
-};
+    targets: ['ios-arm64', 'ios-arm64-simulator', 'ios-x64-simulator'],
+    swiftTarget: 'MyApp', // the Xcode target that embeds the addons
+    convertEsmToCjs: true // keep true: harmless on V8, required by any CJS-only engine (JSC, QuickJS)
+  }
+}
 ```
 
-3. Generate:
+Do not add an `output` section: the setup decides where the results go. The wallet packages listed in [`js/package.json`](js/package.json) are pinned to tested versions. Any other package you name is installed on the fly at its latest version.
 
-```bash
-wdk-worklet-bundler generate --install
-```
-
-This produces:
-
-- The worklet bundle at the configured output path
-- Native addon xcframeworks in `ios-addons/` (or `mac-addons/`)
-- An `addons.yml` for BareKit/XcodeGen integration
-
-The set of addons is not fixed: the bundler links one xcframework per native dependency pulled in by the wallet and protocol packages in your `wdk.config.js`, so the count varies with the networks you enable.
-
-4. Download **BareKit.xcframework** from [bare-kit releases](https://github.com/holepunchto/bare-kit/releases).
-
-5. Continue to **Step 3** below to add everything to your project.
-
-> See the [bundler README](https://github.com/tetherto/wdk-worklet-bundler#quick-start--swift--kotlin-json-rpc) for the full configuration reference and advanced options.
-
----
-
-#### Pre-built releases (not available)
-
-An earlier, naive attempt shipped pre-built worklet bundles and addon zips as GitHub prereleases. Those artifacts went stale against the current worklet and are no longer compatible, so generating the bundle with the bundler is currently the only supported path. Automating this so integration is as simple as [`wdk-core-kotlin`](https://github.com/Tetherto/wdk-core-kotlin) is tracked in [tetherto/wdk-core-swift#5](https://github.com/tetherto/wdk-core-swift/issues/5).
-
----
-
-### Step 3 — Add to Your Project
-
-You can wire the artifacts in from the Xcode IDE, or drive everything from the terminal with [XcodeGen](https://github.com/yonaskolb/XcodeGen) and the Xcode Command Line Tools. Both produce the same result.
-
-#### Using the Xcode IDE
-
-1. **BareKit.xcframework** — Drag into your Xcode project. In your target's **General > Frameworks, Libraries, and Embedded Content**, set it to **Embed & Sign**.
-
-2. **Worklet bundle** (`wdk-worklet.mobile.bundle` or `wdk-worklet.macos.bundle`) — Drag into your Xcode project navigator. Ensure it appears in your target's **Build Phases > Copy Bundle Resources**.
-
-3. **Addon xcframeworks** — Drag all xcframeworks into your project. Add them to **Frameworks, Libraries, and Embedded Content** with **Embed & Sign**.
-
-Build and run.
-
-#### Using XcodeGen and the command line (no Xcode IDE required)
-
-The `ios-addons/addons.yml` produced by the bundler is an XcodeGen fragment that declares every addon xcframework. XcodeGen resolves the framework paths in it relative to that file, so you can include the bundler output directory as-is. Add `BareKit.xcframework` and the worklet bundle, and let XcodeGen generate the project:
+### Step 2: Wire it into `project.yml`
 
 ```yaml
+# XcodeGen reads includes before it runs the preGenCommand that writes addons.yml, so the
+# include is off in the first pass and on in the second pass the postGenCommand starts.
 include:
-  - ios-addons/addons.yml
+  - path: addons/addons.yml
+    enable: ${WDK_ADDONS_READY}
 
 packages:
-  WdkSwiftCore:
+  WdkCore:
     url: https://github.com/tetherto/wdk-core-swift
     branch: main
+
+options:
+  # Builds the bundle, the addons and BareKit with the wdk-core-swift revision named above.
+  preGenCommand: |
+    [ "$WDK_INNER" = 1 ] && exit 0
+    set -e
+    core_field() {
+      awk -v key="$1:" '
+        /^  WdkCore:/ { inside = 1; next }
+        inside && /^ ? ?[^ #]/ { inside = 0 }
+        inside && $1 == key { sub(/^[^:]*:[ ]*/, ""); sub(/[ ]+#.*$/, ""); print; exit }
+      ' project.yml | tr -d "\"'"
+    }
+    core_path=$(core_field path)
+    if [ -n "$core_path" ]; then
+      bootstrap="$core_path/js/scripts/bootstrap-app.sh"
+      set --
+    else
+      core_url=$(core_field url)
+      core_ref=""
+      for key in branch revision exactVersion version; do
+        [ -n "$core_ref" ] || core_ref=$(core_field "$key")
+      done
+      if [ -z "$core_url" ] || [ -z "$core_ref" ]; then
+        echo "project.yml: packages.WdkCore needs 'path', or 'url' with 'branch', 'revision' or 'exactVersion'" >&2
+        exit 1
+      fi
+      [ -d .wdk-core-swift/.git ] || git clone --quiet "$core_url" .wdk-core-swift
+      git -C .wdk-core-swift remote set-url origin "$core_url"
+      bootstrap=.wdk-core-swift/js/scripts/bootstrap-app.sh
+      set -- --core-ref "$core_ref"
+    fi
+    if [ ! -x "$bootstrap" ]; then
+      echo "project.yml: $bootstrap not found. This setup needs a wdk-core-swift revision that has the js/ workspace." >&2
+      exit 1
+    fi
+    # The engine is the last word before "$@". V8 is the supported one.
+    "$bootstrap" --platform ios --app-root "$PWD" --engine v8 "$@"
+  # Second pass: generates the project again, this time with addons/addons.yml included.
+  # If it fails, the project of the first pass (which has no addons) is removed.
+  postGenCommand: |
+    [ "$WDK_INNER" = 1 ] && exit 0
+    WDK_INNER=1 WDK_ADDONS_READY=true xcodegen generate --quiet && exit 0
+    code=$?
+    rm -rf MyApp.xcodeproj
+    exit $code
 
 targets:
   MyApp:
@@ -123,15 +114,33 @@ targets:
     platform: iOS
     dependencies:
       - framework: frameworks/BareKit.xcframework
-      - package: WdkSwiftCore
-        product: WdkSwiftCore
+      - package: WdkCore
+        product: WdkCore
     sources:
       - path: MyApp
       - path: wdk-worklet.mobile.bundle
         buildPhase: resources
 ```
 
-Then build from any editor or terminal:
+The setup reads the `WdkCore` entry under `packages`, so the revision is named once:
+
+- `url` with `branch`, `revision` or `exactVersion`: a clone of that revision is kept in `.wdk-core-swift/` for its `js/` workspace. Xcode downloads the Swift package separately, as usual. A version range such as `from:` is not accepted, because it does not name one revision.
+- `path`: a local checkout of this repository is used as it is. Handy when you work on both.
+
+When you copy the two commands into your own project, three things must match it: the package key is `WdkCore`, indented by two spaces under `packages:`; the spec file is named `project.yml`; and the `rm -rf` line of the `postGenCommand` names your project. The commands are plain `sh` and avoid `${...}`, which XcodeGen would expand itself.
+
+Add the generated files to your `.gitignore`:
+
+```gitignore
+*.xcodeproj
+.wdk-core-swift/
+addons/
+frameworks/BareKit.xcframework
+frameworks/.barekit-release
+wdk-worklet.mobile.bundle
+```
+
+### Step 3: Generate and build
 
 ```bash
 xcodegen generate
@@ -140,25 +149,47 @@ xcodebuild build -project MyApp.xcodeproj -scheme MyApp \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-Include `OS=` (or use `id=<udid>`) in the destination when several simulators share a name, otherwise `xcodebuild` reports the destination as ambiguous.
+The first `xcodegen generate` installs the JavaScript toolchain, builds the bundle and the addons for your `wdk.config.js`, and downloads the BareKit release (about 400 MB, once, kept in `~/Library/Caches/wdk-core-swift`). After that:
 
-> The target name in `addons.yml` defaults to `app`. If your target is named differently, set `options.swiftTarget` in `wdk.config.js` (bundler) or edit `addons.yml` to match.
+- Running it again is instant and works offline while nothing changed.
+- Edit `wdk.config.js` and run it again to change networks. The addon set follows your networks: one framework per native dependency of the wallet packages you enabled.
+- `WDK_REFRESH=1 xcodegen generate` rebuilds everything. With a `branch` it also moves the clone to the newest commit of that branch.
+- Run plain `xcodegen generate` from the directory of `project.yml`. Options such as `--spec`, `--project` and `--use-cache` are not passed on to the second pass.
 
-> **Xcode 26:** the Command Line Tools ship the iOS SDK without the simulator platform. If `xcodebuild` fails with "Supported platforms for the buildables in the current scheme is empty", run `xcodebuild -downloadPlatform iOS` once (several GB).
+Include `OS=` (or use `id=<udid>`) in the `xcodebuild` destination when several simulators share a name, otherwise `xcodebuild` reports the destination as ambiguous.
+
+> **Xcode 26 and later:** the Command Line Tools ship the iOS SDK without the simulator platform. If `xcodebuild` fails with "Supported platforms for the buildables in the current scheme is empty", run `xcodebuild -downloadPlatform iOS` once (several GB).
+
+### Without XcodeGen
+
+Clone this repository anywhere and run the same script by hand:
+
+```bash
+git clone https://github.com/tetherto/wdk-core-swift
+wdk-core-swift/js/scripts/bootstrap-app.sh --platform ios --app-root /path/to/MyApp
+```
+
+It leaves `wdk-worklet.mobile.bundle`, `addons/` and `frameworks/BareKit.xcframework` in your app (`--help` lists the options, including `--platform macos`). Then, in the Xcode IDE:
+
+1. **BareKit.xcframework**: drag it into your project. In your target's **General > Frameworks, Libraries, and Embedded Content**, set it to **Embed & Sign**.
+2. **Worklet bundle**: drag it into the project navigator and make sure it appears in **Build Phases > Copy Bundle Resources**.
+3. **Addon xcframeworks**: drag all of `addons/*.xcframework` into your project and set them to **Embed & Sign**.
+
+Add this repository under **File > Add Package Dependencies** for the `WdkCore` Swift API, then build and run.
 
 ## Example
 
-[**wdk-starter-swift**](https://github.com/Tetherto/wdk-starter-swift) is a minimal iOS app that integrates `WdkSwiftCore` end to end: create or import a wallet, derive Ethereum (Sepolia) and Bitcoin addresses, fetch balances, call arbitrary WDK methods, and dispose.
+[**wdk-starter-swift**](https://github.com/Tetherto/wdk-starter-swift) is a minimal iOS app that integrates `WdkCore` end to end: create or import a wallet, derive Ethereum (Sepolia) and Bitcoin addresses, fetch balances, call arbitrary WDK methods, and dispose.
 
-It follows the XcodeGen flow described above, so it does not depend on the Xcode IDE. The project was developed and built using only the Xcode Command Line Tools and VS Code — `xcodegen generate` followed by `xcodebuild` for a simulator destination — and it can equally be opened in Xcode. That command-line path was last verified against this package's `main` with Xcode 26.6 and XcodeGen 2.44 (build, install, and a create-wallet / addresses / balances / dispose run on an iOS 26 simulator). Use it as a reference for the `project.yml` layout, the `addons.yml` include, and where the worklet bundle and `BareKit.xcframework` live in the tree.
+It follows the XcodeGen flow described above, so it does not depend on the Xcode IDE: `xcodegen generate` followed by `xcodebuild` for a simulator destination, and it can equally be opened in Xcode. Use it as a reference for `wdk.config.js`, the `project.yml` hooks, and where the worklet bundle and `BareKit.xcframework` live in the tree.
 
 ## Quick Start
 
 ```swift
-import WdkSwiftCore
+import WdkCore
 
 // Initialize
-let wdk = WdkSwiftCore()
+let wdk = WdkCore()
 
 // Create a new wallet
 let entropy = try await wdk.generateEntropyAndEncrypt(wordCount: 12)
@@ -207,13 +238,13 @@ try await wdk.dispose()
 // Default: auto-detects platform bundle
 //   macOS → wdk-worklet.macos.bundle
 //   iOS   → wdk-worklet.mobile.bundle
-let wdk = WdkSwiftCore()
+let wdk = WdkCore()
 
 // Custom bundle name
-let wdk = WdkSwiftCore(bundleName: "my-custom-worklet")
+let wdk = WdkCore(bundleName: "my-custom-worklet")
 
 // Custom bundle path (for frameworks, test targets, or app extensions)
-let wdk = WdkSwiftCore(bundlePath: "/path/to/wdk-worklet.mobile.bundle")
+let wdk = WdkCore(bundlePath: "/path/to/wdk-worklet.mobile.bundle")
 ```
 
 ### Wallet Lifecycle
@@ -260,7 +291,7 @@ public enum WDKError: Error {
 ```
 Your App
   │
-  ├── WdkSwiftCore (Swift, async/await API)
+  ├── WdkCore (Swift, async/await API)
   │     │
   │     ├── JSON-RPC 2.0 over length-prefixed IPC
   │     │
@@ -276,53 +307,60 @@ Your App
 
 ## Running the Tests
 
-The test suite runs on macOS against a real worklet bundle and the addon frameworks. Generate them with the bundler using `platforms: ["macos"]`, `convertEsmToCjs: true`, and `output.bundle: "./.wdk-bundle/wdk-worklet.macos.bundle"`, then place them where the tests expect:
-
-```
-Frameworks/BareKit.xcframework          # from bare-kit releases
-Tests/Resources/macos/wdk-worklet.macos.bundle
-Tests/Resources/macos/Frameworks/*.framework   # contents of mac-addons/
-```
-
-Then prepare the frameworks and run the suite:
+The test suite runs on macOS against a real worklet bundle and the addon frameworks. One command does everything from a clean checkout:
 
 ```bash
-./Scripts/prepare-macos-frameworks.sh   # fix rpaths, re-sign ad hoc, unquarantine BareKit
-./Scripts/test-with-frameworks.sh    # wraps `swift test` with BareKit linked
+./Scripts/test-with-frameworks.sh
 ```
 
-The first script adds the rpaths sibling addons need to load each other and re-signs them (see [Troubleshooting](#troubleshooting)). It resolves paths relative to the repository root, so it can be called from anywhere. The second symlinks the addon frameworks into the working directory so the Bare runtime can `dlopen` them, and cleans up afterwards. All of these paths are git-ignored.
+It builds the bundle and the addons for [`js/wdk.config.macos.js`](js/wdk.config.macos.js) and fetches BareKit (both through `js/scripts/bootstrap-app.sh`, which does nothing when they are up to date), fixes the addon rpaths and re-signs them (`Scripts/prepare-macos-frameworks.sh`, see [Troubleshooting](#troubleshooting)), and runs `swift test` with BareKit linked. Arguments are passed on to `swift test`, and `WDK_REFRESH=1` forces a rebuild. Plain `swift test` does not work: it cannot find BareKit.
 
-While it runs, the test helper owns the `bare-*.framework` and `sodium-*.framework` names in the repository root. It replaces existing links with those names and removes its temporary links afterwards. If you stage your own frameworks for testing, clean them up before running the helper.
+The generated files are git-ignored:
+
+```
+Frameworks/BareKit.xcframework                  # BareKit 2.x, V8
+Tests/Resources/macos/wdk-worklet.macos.bundle
+Tests/Resources/macos/Frameworks/*.framework
+```
+
+While it runs, the test helper symlinks the addon frameworks into the working directory so the Bare runtime can `dlopen` them, and it owns the `bare-*.framework` and `sodium-*.framework` names in the repository root. It replaces existing links with those names and removes its temporary links afterwards. If you stage your own frameworks for testing, clean them up before running the helper.
 
 ## Troubleshooting
+
+**`'BareKit/BareKit.h' file not found` when building.** The compiler did not find a BareKit 2.x framework. Either `frameworks/BareKit.xcframework` is missing, or it is a BareKit 3.x framework, which has no Objective-C API (it only ships `bare-kit.h`). Remove it and run `xcodegen generate` again to fetch the supported release. In this repository, run the tests through `./Scripts/test-with-frameworks.sh`.
+
+**Swift errors about `Worklet` inside `WdkCore.swift`** (a call that can throw, or wrong argument labels on `start`). The build resolved `bare-kit-swift` 2.x, which wraps Bare Kit v3. This package requires 1.x and declares it in `Package.swift`. Remove any override of that dependency in your project, delete your `Package.resolved`, and resolve packages again.
+
+**The setup refuses a BareKit release or framework.** Only BareKit 2.x release tags (`v2.<minor>.<patch>`) are accepted, and a framework found in `frameworks/` must expose the Bare Kit v2 API. See the supported stack at the top of the [Integration Guide](#integration-guide).
 
 **Xcode refuses the addon frameworks with a code signature error.** Frameworks copied or dragged out of the bundler output lose their signature, and `install_name_tool` invalidates it too. Re-sign them ad hoc:
 
 ```bash
 # iOS xcframeworks in your app
-find ios-addons -name '*.framework' -type d -exec codesign -s - --force {} \;
+find addons -name '*.framework' -type d -exec codesign -s - --force {} \;
 
 # macOS test frameworks in this repo
 ./Scripts/prepare-macos-frameworks.sh
 ```
 
-**`BareKit.xcframework` is blocked by Gatekeeper.** Archives downloaded from GitHub releases carry the `com.apple.quarantine` attribute, which can make the linker or `dyld` reject the framework. Strip it:
+**`BareKit.xcframework` is blocked by Gatekeeper.** Archives downloaded from GitHub releases carry the `com.apple.quarantine` attribute, which can make the linker or `dyld` reject the framework. The setup strips it. For a framework you downloaded yourself:
 
 ```bash
 xattr -dr com.apple.quarantine path/to/BareKit.xcframework
 ```
 
-**Worklet fails to boot with a signal 6 abort.** Two common causes:
+**Worklet fails to boot with a signal 6 abort.** Common causes:
 
 - An addon cannot `dlopen` a sibling. Check that every framework the bundle needs is present and, on macOS, that the rpath fix above has been applied.
-- The bundle contains ES modules. The console shows `Uncaught (in promise) createModule@[native code]` with a `bare-module` stack ending in a `require` from the worklet, and the process aborts on the first call. JavaScriptCore cannot load ESM from the bundle; set `options.convertEsmToCjs: true` in `wdk.config.js` and regenerate.
+- The `bare-node-runtime` pin was removed or raised. See the pinned dependencies in [`js/README.md`](js/README.md#pinned-dependencies).
+- On JavaScriptCore only: the bundle contains ES modules. The console shows `Uncaught (in promise) createModule@[native code]` with a `bare-module` stack ending in a `require` from the worklet. Keep `options.convertEsmToCjs: true` in `wdk.config.js` and regenerate.
 
 ## Requirements
 
-- iOS 14.0+ / macOS 11.0+
-- Swift 5.9+
-- Xcode 15.0+ (the full IDE, or just the Command Line Tools plus [XcodeGen](https://github.com/yonaskolb/XcodeGen))
+- iOS 14.0+ / macOS 13.0+
+- Swift 5.10+ (Xcode 15.3+; the full IDE, or just the Command Line Tools plus [XcodeGen](https://github.com/yonaskolb/XcodeGen))
+- For the setup: Node.js `^22.21.0` or `>=24.9.0` with npm, git, and XcodeGen 2.46+ on your `PATH`
+- BareKit 2.5.5 (V8), fetched by the setup
 
 ## License
 

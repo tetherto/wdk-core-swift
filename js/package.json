@@ -1,0 +1,27 @@
+{
+  "name": "wdk-core-swift-worklet",
+  "private": true,
+  "description": "Pinned JavaScript toolchain that builds the WDK worklet bundle and native addons for WdkCore",
+  "engines": {
+    "node": "^22.21.0 || >=24.9.0"
+  },
+  "scripts": {
+    "clean": "rm -rf .wdk .wdk-bundle .wdk-cache ios-addons mac-addons wdk.config.js"
+  },
+  "dependencies": {
+    "@tetherto/pear-wrk-wdk": "1.0.0-beta.17",
+    "@tetherto/wdk": "1.0.0-beta.22",
+    "@tetherto/wdk-wallet-btc": "1.0.0-beta.17",
+    "@tetherto/wdk-wallet-evm": "1.0.0-beta.26",
+    "@tetherto/wdk-wallet-evm-erc-4337": "1.0.0-beta.24",
+    "@tetherto/wdk-wallet-solana": "1.0.0-beta.20",
+    "bare-crypto": "1.15.4",
+    "bare-node-runtime": "1.5.0"
+  },
+  "devDependencies": {
+    "@tetherto/wdk-worklet-bundler": "1.0.0-beta.17"
+  },
+  "overrides": {
+    "bare-node-runtime": "1.5.0"
+  }
+}

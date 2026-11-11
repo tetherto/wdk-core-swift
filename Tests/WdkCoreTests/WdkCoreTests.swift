@@ -1,9 +1,9 @@
 import Testing
 import Foundation
 import BareKit
-@testable import WdkSwiftCore
+@testable import WdkCore
 
-/// Test suite for WdkSwiftCore functionality
+/// Test suite for WdkCore functionality
 /// These tests need a macOS worklet bundle and addon frameworks under
 /// Tests/Resources/macos/ (generated with wdk-worklet-bundler, platforms: ["macos"]),
 /// prepared with ./Scripts/prepare-macos-frameworks.sh and run via
@@ -98,7 +98,7 @@ func testFramedEcho() async throws {
 
 @Test("Bundle not found throws error")
 func testBundleNotFound() async {
-    let wdk = WdkSwiftCore(bundleName: "nonexistent-bundle")
+    let wdk = WdkCore(bundleName: "nonexistent-bundle")
 
     do {
         _ = try await wdk.generateEntropyAndEncrypt(wordCount: 12)
@@ -114,7 +114,7 @@ func testBundleNotFound() async {
 
 @Test("Minimal WDK bundle load", .timeLimit(.minutes(1)))
 func testMinimalWDKBundleLoad() async throws {
-    let wdk = WdkSwiftCore()
+    let wdk = WdkCore()
     let result = try await wdk.generateEntropyAndEncrypt(wordCount: 12)
     #expect(!result.encryptionKey.isEmpty)
 }
@@ -126,7 +126,7 @@ struct WDKOperationTests {
     // Single shared instance — worklet starts once and stays running.
     // Creating/destroying multiple WDK worklets causes SIGSEGV due to
     // async addon cleanup in the bare runtime.
-    nonisolated(unsafe) static let wdk = WdkSwiftCore()
+    nonisolated(unsafe) static let wdk = WdkCore()
 
     @Test("Worklet starts successfully")
     func testWorkletStarts() async throws {
@@ -149,7 +149,7 @@ struct WDKOperationTests {
 
         // Use a separate instance for explicit path test — this is the ONLY
         // extra instance we create, and it stays alive for the rest of the suite.
-        let wdk = WdkSwiftCore(bundlePath: testPath)
+        let wdk = WdkCore(bundlePath: testPath)
         let result = try await wdk.generateEntropyAndEncrypt(wordCount: 12)
         #expect(!result.encryptionKey.isEmpty)
     }
