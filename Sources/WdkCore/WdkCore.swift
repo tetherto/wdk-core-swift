@@ -256,7 +256,7 @@ public class WdkCore {
     private func readFramed() async throws -> Data {
         let lengthData = try await readExactly(bytes: 4)
         let length = lengthData.withUnsafeBytes {
-            $0.load(as: UInt32.self).bigEndian
+            $0.loadUnaligned(as: UInt32.self).bigEndian
         }
 
         guard length > 0 && length < 10_000_000 else {
