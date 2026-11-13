@@ -21,8 +21,8 @@ set -euo pipefail
 #   --platform   ios or macos. Selects which folder of the archive is extracted.
 #   --dest       Directory that receives BareKit.xcframework (created if missing).
 #   --tag        BareKit 2.x release tag (default: v2.5.5).
-#   --engine     v8 (default) or javascriptcore. JavaScriptCore is unsupported
-#                on this line, see js/README.md.
+#   --engine     v8 (default) or javascriptcore. JavaScriptCore is discouraged,
+#                see js/README.md.
 #
 # Environment:
 #   WDK_REFRESH=1   Extract again even if the framework is already in place.
@@ -104,8 +104,8 @@ tetherto/wdk-worklet-bundler#84. The tested release is $DEFAULT_TAG."
 fi
 
 if [ "$ENGINE" != "v8" ]; then
-  echo "⚠️  JavaScriptCore is unsupported on this line and was not re-validated. Known issues are" >&2
-  echo "   listed in js/README.md. V8 is the recommendation until bare-stow manages the engine." >&2
+  echo "⚠️  JavaScriptCore is discouraged: it has known issues that are yours to handle, see" >&2
+  echo "   js/README.md. V8 is the default and the tested engine." >&2
 fi
 
 framework="$DEST/$FRAMEWORK_NAME"

@@ -74,9 +74,9 @@ A wallet package that is not in `package.json` is installed on the fly, at its l
 
 **V8.** It is the engine of the BareKit 2.x prebuilds this package is built and tested with (BareKit 2.5.5). BareKit 3.x is a different distribution: it publishes no `prebuilds.zip`, has no Objective-C API, and needs [bare-stow](https://github.com/holepunchto/bare-stow). It is adopted in phase 3a of [tetherto/wdk-worklet-bundler#84](https://github.com/tetherto/wdk-worklet-bundler/issues/84), so 3.x tags and frameworks are rejected here.
 
-### JavaScriptCore (unsupported)
+### JavaScriptCore
 
-The BareKit 2.x releases also ship JavaScriptCore builds (`ios-javascriptcore/`, `darwin-javascriptcore/`). You can switch to them at your own risk by changing one word on the bootstrap line of your `project.yml`:
+V8 is the default, and the engine this package is tested and released with. The BareKit 2.x releases also ship JavaScriptCore builds (`ios-javascriptcore/`, `darwin-javascriptcore/`), and the setup supports them through one switch: change one word on the bootstrap line of your `project.yml`.
 
 ```
 "$bootstrap" --platform ios --app-root "$PWD" --engine javascriptcore "$@"
@@ -84,11 +84,12 @@ The BareKit 2.x releases also ship JavaScriptCore builds (`ios-javascriptcore/`,
 
 `convertEsmToCjs` must be `true`: JavaScriptCore cannot load ES modules from the bundle, and the bootstrap refuses to continue otherwise.
 
-JavaScriptCore was not re-validated for this release. Known issues:
+JavaScriptCore is discouraged, and the team that enables it owns the engine issues. Known issues:
 
-- **Crash on iOS 26.** The worklet crashes within the first second inside the system JavaScriptCore (`JSRopeString::resolveToBuffer`), see [#22](https://github.com/tetherto/wdk-core-swift/issues/22).
-- **No `BroadcastChannel` or `MessageChannel`.** They rely on shared-memory N-API functions that the JavaScriptCore port does not provide ([holepunchto/libjsc#26](https://github.com/holepunchto/libjsc/issues/26)), and from 1.5.1 `bare-node-runtime` loads them eagerly ([holepunchto/bare-node-runtime#13](https://github.com/holepunchto/bare-node-runtime/issues/13)). The `bare-node-runtime` pin below keeps the worklet booting; code that needs those globals does not work.
-- **Worklets started from inline source abort** on the JavaScriptCore build of BareKit 2.5.5, which three tests of this repository do, see [#20](https://github.com/tetherto/wdk-core-swift/issues/20). Starting the packed bundle is not affected.
+- **Intermittent crash on iOS 26.** The worklet can crash within the first second inside the system JavaScriptCore (`JSRopeString::resolveToBuffer`), see [#22](https://github.com/tetherto/wdk-core-swift/issues/22). Seen on BareKit 2.3.0 and 2.5.5.
+- **A worklet started from plain JavaScript source aborts** on the JavaScriptCore build of BareKit 2.5.5, see [#20](https://github.com/tetherto/wdk-core-swift/issues/20). Start a packed bundle, which is what `WdkCore` always does.
+
+Last checked on 2026-11-13 with BareKit 2.5.5. This repository's macOS suite passes on JavaScriptCore (run with `--engine javascriptcore` added to the bootstrap line of `Scripts/test-with-frameworks.sh`). On the iOS simulator the worklet answered in 9 of 9 launches on iOS 26.0, 12 of 12 on iOS 26.5 and 18 of 21 on iOS 26.3.1.
 
 We recommend V8 until bare-stow manages the engine and phase 3a lands.
 

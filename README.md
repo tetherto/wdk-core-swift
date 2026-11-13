@@ -20,7 +20,7 @@ For the broader WDK ecosystem, see the [WDK documentation](https://docs.wdk.teth
 
 You describe your networks in one file, and `xcodegen generate` builds and wires everything else. The work is done by the pinned JavaScript workspace in this repository's [`js/`](js/README.md) directory, so the bundle, the addons and the Swift package always come from the same revision.
 
-> **Supported stack.** BareKit **2.5.5** with the **V8** engine, `@tetherto/wdk-worklet-bundler` and `@tetherto/pear-wrk-wdk` **1.0.0-beta.17** (JSON-RPC transport), `bare-kit-swift` **1.x**. BareKit 2.5.5 is the latest BareKit this package supports. BareKit 3.x is a different distribution that needs [bare-stow](https://github.com/holepunchto/bare-stow) and arrives with the rework tracked in [tetherto/wdk-worklet-bundler#84](https://github.com/tetherto/wdk-worklet-bundler/issues/84); the setup refuses it. JavaScriptCore builds of BareKit 2.x can still be used at your own risk, see [`js/README.md`](js/README.md#javascriptcore-unsupported).
+> **Supported stack.** BareKit **2.5.5** with the **V8** engine, `@tetherto/wdk-worklet-bundler` and `@tetherto/pear-wrk-wdk` **1.0.0-beta.17** (JSON-RPC transport), `bare-kit-swift` **1.x**. BareKit 2.5.5 is the latest BareKit this package supports. BareKit 3.x is a different distribution that needs [bare-stow](https://github.com/holepunchto/bare-stow) and arrives with the rework tracked in [tetherto/wdk-worklet-bundler#84](https://github.com/tetherto/wdk-worklet-bundler/issues/84); the setup refuses it. JavaScriptCore builds of BareKit 2.x are available through a documented switch. It is discouraged because of a known crash on iOS 26, see [`js/README.md`](js/README.md#javascriptcore).
 
 You need [XcodeGen](https://github.com/yonaskolb/XcodeGen) on your `PATH` (`brew install xcodegen`), Node.js `^22.21.0` or `>=24.9.0` with npm, and git.
 
@@ -105,7 +105,7 @@ options:
       echo "project.yml: $bootstrap not found. This setup needs a wdk-core-swift revision that has the js/ workspace." >&2
       exit 1
     fi
-    # The engine is the last word before "$@". V8 is the supported one.
+    # The engine is the last word before "$@". V8 is the default and the tested one, see js/README.md.
     "$bootstrap" --platform ios --app-root "$PWD" --engine v8 "$@"
   # Second pass: generates the project again, this time with addons/addons.yml included.
   # If it fails, the project of the first pass (which has no addons) is removed.
@@ -116,10 +116,17 @@ options:
     rm -rf MyApp.xcodeproj
     exit $code
 
+name: MyApp
+
 targets:
   MyApp:
     type: application
     platform: iOS
+    deploymentTarget: "15.0"
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.MyApp  # use your own
     dependencies:
       - framework: frameworks/BareKit.xcframework
       - package: WdkCore
@@ -321,7 +328,7 @@ The test suite runs on macOS against a real worklet bundle and the addon framewo
 ./Scripts/test-with-frameworks.sh
 ```
 
-It builds the bundle and the addons for [`js/wdk.config.macos.js`](js/wdk.config.macos.js) and fetches BareKit (both through `js/scripts/bootstrap-app.sh`, which does nothing when they are up to date), fixes the addon rpaths and re-signs them (`Scripts/prepare-macos-frameworks.sh`, see [Troubleshooting](#troubleshooting)), and runs `swift test` with BareKit linked. Arguments are passed on to `swift test`, and `WDK_REFRESH=1` forces a rebuild. Plain `swift test` does not work: it cannot find BareKit.
+It builds the bundle and the addons for [`js/wdk.config.macos.js`](js/wdk.config.macos.js) and fetches BareKit (both through `js/scripts/bootstrap-app.sh`, which does nothing when they are up to date), fixes the addon rpaths and re-signs them (`Scripts/prepare-macos-frameworks.sh`, see [Troubleshooting](#troubleshooting)), packs the small fixture worklets of `Tests/Fixtures/` into bundles, and runs `swift test` with BareKit linked. Arguments are passed on to `swift test`, and `WDK_REFRESH=1` forces a rebuild. Plain `swift test` does not work: it cannot find BareKit.
 
 The generated files are git-ignored:
 
@@ -329,6 +336,7 @@ The generated files are git-ignored:
 Frameworks/BareKit.xcframework                  # BareKit 2.x, V8
 Tests/Resources/macos/wdk-worklet.macos.bundle
 Tests/Resources/macos/Frameworks/*.framework
+Tests/Resources/macos/fixtures/*.bundle
 ```
 
 While it runs, the test helper symlinks the addon frameworks into the working directory so the Bare runtime can `dlopen` them, and it owns the `bare-*.framework` and `sodium-*.framework` names in the repository root. It replaces existing links with those names and removes its temporary links afterwards. If you stage your own frameworks for testing, clean them up before running the helper.

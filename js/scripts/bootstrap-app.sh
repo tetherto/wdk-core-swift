@@ -32,7 +32,7 @@ set -euo pipefail
 #   --barekit-out <dir>      Destination of BareKit.xcframework (default: frameworks).
 #   --engine <v8|javascriptcore>
 #                            BareKit engine (default: v8). JavaScriptCore is
-#                            unsupported on this line, see js/README.md.
+#                            discouraged, see js/README.md.
 #   --barekit-tag <v2.x.y>   BareKit 2.x release (default: the one pinned in fetch-barekit.sh).
 #   --core-ref <ref>         Branch, tag, version or commit this wdk-core-swift checkout must be
 #                            at. Meant for the clone an app's build keeps for itself: the
