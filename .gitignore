@@ -24,3 +24,15 @@ Tests/**/*.framework
 
 # Cursor
 .cursor/
+
+# JavaScript workspace (js/): installed and generated locally
+js/node_modules/
+js/.wdk/
+js/.wdk-bundle/
+js/.wdk-cache/
+js/ios-addons/
+js/mac-addons/
+# An app's worklet configuration, copied in by js/scripts/bootstrap-app.sh
+js/wdk.config.js
+# Revision recorded by bootstrap-app.sh --core-ref in a clone an app's build manages
+/.wdk-core-ref

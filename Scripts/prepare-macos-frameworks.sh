@@ -19,9 +19,9 @@ set -e
 #      BareKit.xcframework when it is downloaded from GitHub releases. The
 #      addon frameworks are generated locally by the bundler and never carry it.
 #
-# Generate the frameworks first with @tetherto/wdk-worklet-bundler using
-# platforms: ["macos"], then copy mac-addons/*.framework into
-# Tests/Resources/macos/Frameworks/ and the bundle into Tests/Resources/macos/.
+# Scripts/test-with-frameworks.sh calls this after js/scripts/bootstrap-app.sh has
+# built the frameworks into Tests/Resources/macos/Frameworks/. Run it by hand only
+# for frameworks you staged yourself.
 #
 # Usage (from anywhere; paths are resolved relative to the repo root):
 #   ./Scripts/prepare-macos-frameworks.sh [--frameworks-dir <path>]
@@ -60,8 +60,7 @@ done
 
 if [ ! -d "$FRAMEWORKS_DIR" ]; then
   echo "Error: '$FRAMEWORKS_DIR' not found." >&2
-  echo "Generate the macOS addons with wdk-worklet-bundler (platforms: [\"macos\"])" >&2
-  echo "and copy mac-addons/*.framework into that directory first." >&2
+  echo "Run ./Scripts/test-with-frameworks.sh, which builds the macOS addons there first." >&2
   exit 1
 fi
 
@@ -90,4 +89,3 @@ if [ -d "$BAREKIT_XCFRAMEWORK" ]; then
 fi
 
 echo "✅ Prepared $count frameworks in $FRAMEWORKS_DIR"
-echo "   Run ./Scripts/test-with-frameworks.sh to execute the test suite."

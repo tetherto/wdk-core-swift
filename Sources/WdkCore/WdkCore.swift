@@ -41,12 +41,12 @@ private actor PendingRequests {
     }
 }
 
-// MARK: - WdkSwiftCore
+// MARK: - WdkCore
 
 /// Swift client for WDK operations via JSON-RPC 2.0
 /// Handles worklet lifecycle and IPC communication internally.
 /// Supports concurrent calls via ID-based response multiplexing.
-public class WdkSwiftCore {
+public class WdkCore {
     private let worklet: Worklet
     private var ipc: IPC?
     private var requestId: Int = 0
@@ -73,7 +73,7 @@ public class WdkSwiftCore {
         let continuation: CheckedContinuation<Void, Error>
     }
 
-    /// Initialize WdkSwiftCore
+    /// Initialize WdkCore
     /// - Parameters:
     ///   - bundleName: Name of the worklet bundle (default: platform-specific - "wdk-worklet.macos" on macOS, "wdk-worklet.mobile" on iOS)
     ///   - bundlePath: Optional explicit path to the bundle. If provided, this takes precedence over auto-detection.
