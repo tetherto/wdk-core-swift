@@ -10,7 +10,8 @@ set -e
 #      frameworks for js/wdk.config.macos.js and fetches BareKit.xcframework
 #      (BareKit 2.x, V8). Nothing is rebuilt or downloaded when it is up to date.
 #   2. Scripts/prepare-macos-frameworks.sh fixes the addon rpaths and re-signs them.
-#   3. `swift test` runs with BareKit linked. Extra arguments are passed to it.
+#   3. The fixture worklets of Tests/Fixtures/ are packed into bundles with bare-pack.
+#   4. `swift test` runs with BareKit linked. Extra arguments are passed to it.
 #
 # Usage:
 #   ./Scripts/test-with-frameworks.sh [swift test arguments]
@@ -32,6 +33,15 @@ js/scripts/bootstrap-app.sh --platform macos --app-root "$PWD" \
   --config js/wdk.config.macos.js \
   --bundle-out "$BUNDLE" --addons-out "$FRAMEWORK_DIR" --barekit-out "$BAREKIT_DIR"
 Scripts/prepare-macos-frameworks.sh --frameworks-dir "$FRAMEWORK_DIR"
+
+# Pack the fixture worklets of Tests/Fixtures/ into bundles. They have no dependencies, so
+# the bundles are the same for every host.
+FIXTURE_DIR="Tests/Resources/macos/fixtures"
+mkdir -p "$FIXTURE_DIR"
+for fixture in Tests/Fixtures/*.js; do
+  name="$(basename "$fixture" .js)"
+  js/node_modules/.bin/bare-pack --out "$FIXTURE_DIR/$name.bundle" "$fixture"
+done
 
 echo "Running WdkCore tests with all frameworks linked..."
 

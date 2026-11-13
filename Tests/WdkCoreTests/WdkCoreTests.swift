@@ -11,12 +11,19 @@ import BareKit
 
 // MARK: - IPC Tests
 
+/// Starts `worklet` from a fixture of Tests/Fixtures/, which Scripts/test-with-frameworks.sh
+/// packs into a bundle. A packed bundle starts on every engine; plain source aborts on the
+/// JavaScriptCore build of BareKit 2.5.5.
+private func startFixture(_ name: String, on worklet: Worklet) throws {
+    let path = FileManager.default.currentDirectoryPath + "/Tests/Resources/macos/fixtures/\(name).bundle"
+    worklet.start(filename: path, source: try Data(contentsOf: URL(fileURLWithPath: path)))
+}
+
 @Test("IPC echo with simple JS", .timeLimit(.minutes(1)))
 func testIPCEchoSimple() async throws {
     let worklet = Worklet()
 
-    let source = "BareKit.IPC.on('data', (data) => BareKit.IPC.write(data)).write(Buffer.from('READY'))"
-    worklet.start(filename: "/echo.js", source: source.data(using: .utf8)!)
+    try startFixture("echo", on: worklet)
 
     let ipc = IPC(worklet: worklet)
 
@@ -38,8 +45,7 @@ func testIPCEchoSimple() async throws {
 func testIPCWithLoadedJS() async throws {
     let worklet = Worklet()
 
-    let js = "BareKit.IPC.write(Buffer.from('HELLO_FROM_MODULE'))"
-    worklet.start(filename: "/hello.js", source: js.data(using: .utf8)!)
+    try startFixture("hello", on: worklet)
 
     let ipc = IPC(worklet: worklet)
 
@@ -54,25 +60,7 @@ func testIPCWithLoadedJS() async throws {
 func testFramedEcho() async throws {
     let worklet = Worklet()
 
-    let js = """
-    const ipc = BareKit.IPC
-    let buf = Buffer.alloc(0)
-    ipc.on('data', (chunk) => {
-      buf = Buffer.concat([buf, chunk])
-      while (buf.length >= 4) {
-        const len = buf.readUInt32BE(0)
-        if (buf.length < 4 + len) break
-        const msg = buf.slice(4, 4 + len)
-        buf = buf.slice(4 + len)
-        const header = Buffer.allocUnsafe(4)
-        header.writeUInt32BE(msg.length, 0)
-        ipc.write(Buffer.concat([header, msg]))
-      }
-    })
-    ipc.write(Buffer.from('READY'))
-    """
-
-    worklet.start(filename: "/framed-echo.js", source: js.data(using: .utf8)!)
+    try startFixture("framed-echo", on: worklet)
     let ipc = IPC(worklet: worklet)
 
     let ready = try await ipc.read()
