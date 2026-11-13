@@ -74,6 +74,9 @@ public class WdkCore {
     }
 
     /// Initialize WdkCore
+    ///
+    /// The worklet bundle is loaded by the first call made on the instance. If the bundle
+    /// cannot be found or read, that call throws and the next call tries again.
     /// - Parameters:
     ///   - bundleName: Name of the worklet bundle (default: platform-specific - "wdk-worklet.macos" on macOS, "wdk-worklet.mobile" on iOS)
     ///   - bundlePath: Optional explicit path to the bundle. If provided, this takes precedence over auto-detection.
@@ -148,9 +151,29 @@ public class WdkCore {
 
     /// Ensures the worklet and IPC are initialized exactly once,
     /// even when multiple callers race on the first call.
+    /// A failed initialization is not kept: the callers that were waiting for it
+    /// receive its error, and the next call starts a new one.
     private func ensureWorkletStarted() async throws {
         guard let task = resolveInitTask() else { return }
-        try await task.value
+        do {
+            try await task.value
+        } catch {
+            discardInitTask(task)
+            throw error
+        }
+    }
+
+    /// Forgets `task` after it failed, unless a newer initialization already replaced it.
+    /// Nothing else has to be undone: initialization can only fail while locating or
+    /// reading the bundle, which happens before the worklet starts.
+    /// Synchronous so that NSLock is never held across a suspension point.
+    private func discardInitTask(_ task: Task<Void, Error>) {
+        initLock.lock()
+        defer { initLock.unlock() }
+
+        if initializationTask == task {
+            initializationTask = nil
+        }
     }
 
     // MARK: - Private Helper Methods

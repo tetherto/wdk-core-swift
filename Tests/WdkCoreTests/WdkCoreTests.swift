@@ -11,12 +11,18 @@ import BareKit
 
 // MARK: - IPC Tests
 
-/// Starts `worklet` from a fixture of Tests/Fixtures/, which Scripts/test-with-frameworks.sh
-/// packs into a bundle. A packed bundle starts on every engine; plain source aborts on the
-/// JavaScriptCore build of BareKit 2.5.5.
+/// Location of a fixture of Tests/Fixtures/, which Scripts/test-with-frameworks.sh packs into a
+/// bundle. A packed bundle starts on every engine; plain source aborts on the JavaScriptCore
+/// build of BareKit 2.5.5.
+private func fixtureBundleURL(_ name: String) -> URL {
+    URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        .appendingPathComponent("Tests/Resources/macos/fixtures/\(name).bundle")
+}
+
+/// Starts `worklet` from the fixture `name`.
 private func startFixture(_ name: String, on worklet: Worklet) throws {
-    let path = FileManager.default.currentDirectoryPath + "/Tests/Resources/macos/fixtures/\(name).bundle"
-    worklet.start(filename: path, source: try Data(contentsOf: URL(fileURLWithPath: path)))
+    let url = fixtureBundleURL(name)
+    worklet.start(filename: url.path, source: try Data(contentsOf: url))
 }
 
 @Test("IPC echo with simple JS", .timeLimit(.minutes(1)))
@@ -96,6 +102,33 @@ func testBundleNotFound() async {
     } catch {
         Issue.record("Wrong error type: \(error)")
     }
+}
+
+// MARK: - Initialization
+
+@Test("Initialization is retried after the bundle path is repaired", .timeLimit(.minutes(1)))
+func testInitializationRetriedAfterBundlePathRepaired() async throws {
+    // Arrange: a client whose bundle does not exist yet.
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let bundleURL = directory.appendingPathComponent("pong.bundle")
+    let wdk = WdkCore(bundlePath: bundleURL.path)
+
+    // Act: the first call fails, then the bundle appears and the same client is used again.
+    var firstError: Error?
+    do {
+        try await wdk.workletStart()
+    } catch {
+        firstError = error
+    }
+    try FileManager.default.copyItem(at: fixtureBundleURL("pong"), to: bundleURL)
+    let reply = try await wdk.callMethod(methodName: "ping", network: "none")
+
+    // Assert
+    #expect((firstError as? CocoaError)?.code == .fileReadNoSuchFile)
+    #expect(reply as? String == "pong")
 }
 
 // MARK: - Standalone WDK Test
