@@ -116,10 +116,17 @@ options:
     rm -rf MyApp.xcodeproj
     exit $code
 
+name: MyApp
+
 targets:
   MyApp:
     type: application
     platform: iOS
+    deploymentTarget: "15.0"
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.MyApp  # use your own
     dependencies:
       - framework: frameworks/BareKit.xcframework
       - package: WdkCore
