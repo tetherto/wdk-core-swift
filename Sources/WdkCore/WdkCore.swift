@@ -18,11 +18,22 @@ import BareKit
 
 /// Thread-safe storage for in-flight JSON-RPC continuations, keyed by request ID.
 /// The reader loop resolves/rejects entries; callers register before sending.
+/// Once the reader loop has failed, no response can arrive, so no request is accepted.
 private actor PendingRequests {
     private var continuations: [Int: CheckedContinuation<[String: Any], Error>] = [:]
+    private var readerError: Error?
 
-    func register(id: Int, continuation: CheckedContinuation<[String: Any], Error>) {
+    /// Stores `continuation` until the response with `id` arrives.
+    /// - Returns: `false` if the reader loop has failed. The continuation was then resumed
+    ///   with the error that ended the loop, and the request must not be sent.
+    func register(id: Int, continuation: CheckedContinuation<[String: Any], Error>) -> Bool {
+        if let readerError {
+            continuation.resume(throwing: readerError)
+            return false
+        }
+
         continuations[id] = continuation
+        return true
     }
 
     func resolve(id: Int, with response: [String: Any]) {
@@ -33,7 +44,10 @@ private actor PendingRequests {
         continuations.removeValue(forKey: id)?.resume(throwing: error)
     }
 
-    func rejectAll(with error: Error) {
+    /// Records `error` as the failure of the reader loop and rejects every in-flight request
+    /// with it. Requests registered afterwards are refused with the same error.
+    func readerFailed(with error: Error) {
+        readerError = error
         for (_, continuation) in continuations {
             continuation.resume(throwing: error)
         }
@@ -46,6 +60,9 @@ private actor PendingRequests {
 /// Swift client for WDK operations via JSON-RPC 2.0
 /// Handles worklet lifecycle and IPC communication internally.
 /// Supports concurrent calls via ID-based response multiplexing.
+/// If reading from the worklet fails, the calls in flight and every later call on the
+/// instance throw the error that ended the reading. The instance does not recover; create a
+/// new one and initialize it again.
 public class WdkCore {
     private let worklet: Worklet
     private var ipc: IPC?
@@ -209,7 +226,7 @@ public class WdkCore {
                     await self.pending.resolve(id: id, with: obj)
                 }
             } catch {
-                await self?.pending.rejectAll(with: error)
+                await self?.pending.readerFailed(with: error)
             }
         }
     }
@@ -310,7 +327,9 @@ public class WdkCore {
 
         let response: [String: Any] = try await withCheckedThrowingContinuation { continuation in
             Task {
-                await self.pending.register(id: id, continuation: continuation)
+                guard await self.pending.register(id: id, continuation: continuation) else {
+                    return
+                }
 
                 do {
                     try await self.writeFramed(data: requestData)

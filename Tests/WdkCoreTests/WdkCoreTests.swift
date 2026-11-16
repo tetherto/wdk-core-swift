@@ -166,6 +166,44 @@ func testConcurrentFirstCallsShareOneInitialization() async throws {
     #expect(replies == Array(repeating: "pong", count: callCount))
 }
 
+// MARK: - Reader Failure
+
+/// Describes how `call` ended: the description of the error it threw, or a note that it
+/// returned or is still pending. A pending call cannot be cancelled, so awaiting it directly
+/// would hang the test run instead of failing it.
+private func outcome(of call: @escaping () async throws -> Void) async -> String? {
+    let (outcomes, continuation) = AsyncStream<String>.makeStream()
+    Task {
+        do {
+            try await call()
+            continuation.yield("returned without an error")
+        } catch {
+            continuation.yield(error.localizedDescription)
+        }
+    }
+    Task {
+        try? await Task.sleep(for: .seconds(5))
+        continuation.yield("still pending after 5 seconds")
+    }
+    return await outcomes.first { _ in true }
+}
+
+@Test("Calls made after the reader failed throw the error that ended it", .timeLimit(.minutes(1)))
+func testCallsAfterReaderFailureThrowReaderError() async throws {
+    // Arrange: a worklet whose first reply is a frame of length zero, which ends the reader.
+    let wdk = WdkCore(bundlePath: fixtureBundleURL("zero-length-reply").path)
+
+    // Act: the first call is in flight when the reader ends, the second is made afterwards.
+    let firstOutcome = await outcome { try await wdk.workletStart() }
+    let secondOutcome = await outcome {
+        _ = try await wdk.callMethod(methodName: "ping", network: "none")
+    }
+
+    // Assert
+    #expect(firstOutcome == "IPC Error: Invalid message length: 0")
+    #expect(secondOutcome == "IPC Error: Invalid message length: 0")
+}
+
 // MARK: - Standalone WDK Test
 
 @Test("Minimal WDK bundle load", .timeLimit(.minutes(1)))
