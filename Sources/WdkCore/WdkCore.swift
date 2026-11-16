@@ -140,10 +140,12 @@ public class WdkCore {
             self.worklet.start(filename: fullPath, source: bundleData)
 
             self.ipc = IPC(worklet: self.worklet)
-            self.isWorkletStarted = true
-
             self.startReaderLoop()
             self.startWriterLoop()
+
+            // Last step, so a caller that sees the flag set finds IPC, the reader and the
+            // writer in place. Under the lock because resolveInitTask() reads it under the lock.
+            self.initLock.withLock { self.isWorkletStarted = true }
         }
         initializationTask = newTask
         return newTask
@@ -247,8 +249,12 @@ public class WdkCore {
         let lengthData = Data(bytes: &length, count: 4)
         let frame = lengthData + data
 
+        guard let writeContinuation else {
+            throw WDKError.ipcError("IPC not initialized")
+        }
+
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            writeContinuation?.yield(WriteRequest(data: frame, continuation: continuation))
+            writeContinuation.yield(WriteRequest(data: frame, continuation: continuation))
         }
     }
 

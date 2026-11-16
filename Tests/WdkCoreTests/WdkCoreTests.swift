@@ -131,6 +131,41 @@ func testInitializationRetriedAfterBundlePathRepaired() async throws {
     #expect(reply as? String == "pong")
 }
 
+/// A plain run checks that every call is answered. The race between concurrent first calls is
+/// only reported under ThreadSanitizer, so run this test with it:
+/// `./Scripts/test-with-frameworks.sh --sanitize=thread --filter testConcurrentFirstCallsShareOneInitialization`
+/// ThreadSanitizer may also report bare-kit-swift's IPC.swift: rarely for this test alone, and
+/// so far always over the whole suite. That one is a false alarm that fails a run in which
+/// every test passes. Only a report that names WdkCore.swift matters here.
+@Test("Concurrent first calls share one initialization", .timeLimit(.minutes(1)))
+func testConcurrentFirstCallsShareOneInitialization() async throws {
+    // Arrange: a client that no call has started yet.
+    let wdk = WdkCore(bundlePath: fixtureBundleURL("pong").path)
+    let callCount = 1024
+    let longestDelay = 128
+
+    // Act: each call first yields a different number of times, so the calls arrive before,
+    // during and after the initialization.
+    let replies = try await withThrowingTaskGroup(of: String?.self) { group in
+        for index in 0..<callCount {
+            group.addTask {
+                for _ in 0..<(index % longestDelay) {
+                    await Task.yield()
+                }
+                return try await wdk.callMethod(methodName: "ping", network: "none") as? String
+            }
+        }
+        var replies: [String?] = []
+        for try await reply in group {
+            replies.append(reply)
+        }
+        return replies
+    }
+
+    // Assert
+    #expect(replies == Array(repeating: "pong", count: callCount))
+}
+
 // MARK: - Standalone WDK Test
 
 @Test("Minimal WDK bundle load", .timeLimit(.minutes(1)))
