@@ -241,7 +241,8 @@ print("Address: \(address)")
 let balance = try await wdk.getBalance(network: "ethereum")
 print("Balance: \(balance)")
 
-// Clean up when done
+// Release the wallet when done. The worklet keeps running and `wdk` can be
+// initialized again; see Known Limitations before creating a second instance.
 try await wdk.dispose()
 ```
 
@@ -271,7 +272,7 @@ let wdk = WdkCore(bundlePath: "/path/to/wdk-worklet.mobile.bundle")
 | `getMnemonicFromEntropy(encryptedEntropy:encryptionKey:)` | Decrypt entropy to get the mnemonic phrase                                                           |
 | `getSeedAndEntropyFromMnemonic(mnemonic:)`                | Convert an existing mnemonic to encrypted seed + entropy                                             |
 | `initializeWDK(encryptionKey:encryptedSeed:config:)`      | Initialize WDK with keys and network configuration                                                   |
-| `dispose(blockchains:)`                                   | Clean up resources. Omit `blockchains` to tear down the whole instance, or pass names to release only those |
+| `dispose(blockchains:)`                                   | Wipe the seed and the registered wallets inside the worklet, or only the named blockchains. The worklet keeps running (see [Known Limitations](#known-limitations)) |
 
 ### Account Operations
 
@@ -300,6 +301,37 @@ public enum WDKError: Error {
     case bundleNotFound(String)
 }
 ```
+
+## Known Limitations
+
+These apply to the 0.9 line, which runs on BareKit 2.x.
+
+### A `WdkCore` instance is never torn down
+
+Create one `WdkCore` for the lifetime of the process and reuse it. An instance that has started its worklet stays in memory until the process exits, even after `dispose()` and after the app releases its last reference to it: the worklet, its thread and its JavaScript heap remain. In our measurements each abandoned instance kept about 35 MB on the iOS simulator and about 55 MB on macOS. The amount depends on the bundle.
+
+To change wallet, initialize the same instance again instead of creating a new one:
+
+```swift
+// Leaves the old worklet in memory
+try await wdk.dispose()
+wdk = WdkCore()
+
+// Reuses the worklet
+try await wdk.dispose()
+try await wdk.initializeWDK(encryptionKey: newKey, encryptedSeed: newSeed, config: config)
+```
+
+A full `dispose()` wipes the seed and the registered wallets inside the worklet, and `initializeWDK` then builds the new wallet in the same worklet.
+
+Replace the instance only when it can no longer be used:
+
+- Reading from the worklet failed. Every later call on the instance then throws the error that ended the reading.
+- A call never returns. Calls have no timeout and cannot be cancelled on this line.
+
+The replaced instance also stays in memory until the process exits.
+
+**Why this is not fixed on this line.** Ending a worklet means closing its IPC while the instance is waiting to read from it, and with BareKit 2.5.5, the last 2.x release, that can crash the process. Ending the worklet without closing the IPC leaks file descriptors and leaves the reader spinning. BareKit 3.0 reworked the IPC lifecycle, but it has no Objective-C API and this package does not support it yet. Teardown, call timeouts and cancellation are planned with the move to BareKit 3.x in [#24](https://github.com/tetherto/wdk-core-swift/issues/24). The missing teardown is tracked in [#13](https://github.com/tetherto/wdk-core-swift/issues/13).
 
 ## Architecture
 
