@@ -111,7 +111,9 @@ public class WdkCore {
     deinit {
         writeContinuation?.finish()
         if isWorkletStarted {
+            // In this order: closing the IPC first aborts the process on JavaScriptCore.
             worklet.terminate()
+            ipc?.close()
         }
     }
 
@@ -510,7 +512,8 @@ public class WdkCore {
     ///
     /// - Parameter blockchains: The blockchains to dispose. Pass a non-empty
     ///   array to release only those blockchains while keeping the WDK instance
-    ///   alive. Omit to tear the whole instance down.
+    ///   alive. Omit to wipe the seed and every registered wallet. The worklet
+    ///   keeps running; see Known Limitations in the README.
     public func dispose(blockchains: [String] = []) async throws {
         var params: [String: Any] = [:]
         if !blockchains.isEmpty {
