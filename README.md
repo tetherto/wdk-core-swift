@@ -329,7 +329,7 @@ Replace the instance only when it can no longer be used:
 - Reading from the worklet failed. Every later call on the instance then throws the error that ended the reading.
 - A call never returns. Calls have no timeout and cannot be cancelled on this line.
 
-The replaced instance also stays in memory until the process exits.
+After a read failure, the replaced instance is released and its worklet terminated once the app drops its last reference to it. After a call that never returns, it stays in memory until the process exits.
 
 **Why this is not fixed on this line.** Ending a worklet means closing its IPC while the instance is waiting to read from it, and with BareKit 2.5.5, the last 2.x release, that can crash the process. Ending the worklet without closing the IPC leaks file descriptors and leaves the reader spinning. BareKit 3.0 reworked the IPC lifecycle, but it has no Objective-C API and this package does not support it yet. Teardown, call timeouts and cancellation are planned with the move to BareKit 3.x in [#24](https://github.com/tetherto/wdk-core-swift/issues/24). The missing teardown is tracked in [#13](https://github.com/tetherto/wdk-core-swift/issues/13).
 
