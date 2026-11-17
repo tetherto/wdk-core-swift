@@ -11,12 +11,18 @@ import BareKit
 
 // MARK: - IPC Tests
 
-/// Starts `worklet` from a fixture of Tests/Fixtures/, which Scripts/test-with-frameworks.sh
-/// packs into a bundle. A packed bundle starts on every engine; plain source aborts on the
-/// JavaScriptCore build of BareKit 2.5.5.
+/// Location of a fixture of Tests/Fixtures/, which Scripts/test-with-frameworks.sh packs into a
+/// bundle. A packed bundle starts on every engine; plain source aborts on the JavaScriptCore
+/// build of BareKit 2.5.5.
+private func fixtureBundleURL(_ name: String) -> URL {
+    URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        .appendingPathComponent("Tests/Resources/macos/fixtures/\(name).bundle")
+}
+
+/// Starts `worklet` from the fixture `name`.
 private func startFixture(_ name: String, on worklet: Worklet) throws {
-    let path = FileManager.default.currentDirectoryPath + "/Tests/Resources/macos/fixtures/\(name).bundle"
-    worklet.start(filename: path, source: try Data(contentsOf: URL(fileURLWithPath: path)))
+    let url = fixtureBundleURL(name)
+    worklet.start(filename: url.path, source: try Data(contentsOf: url))
 }
 
 @Test("IPC echo with simple JS", .timeLimit(.minutes(1)))
@@ -96,6 +102,106 @@ func testBundleNotFound() async {
     } catch {
         Issue.record("Wrong error type: \(error)")
     }
+}
+
+// MARK: - Initialization
+
+@Test("Initialization is retried after the bundle path is repaired", .timeLimit(.minutes(1)))
+func testInitializationRetriedAfterBundlePathRepaired() async throws {
+    // Arrange: a client whose bundle does not exist yet.
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let bundleURL = directory.appendingPathComponent("pong.bundle")
+    let wdk = WdkCore(bundlePath: bundleURL.path)
+
+    // Act: the first call fails, then the bundle appears and the same client is used again.
+    var firstError: Error?
+    do {
+        try await wdk.workletStart()
+    } catch {
+        firstError = error
+    }
+    try FileManager.default.copyItem(at: fixtureBundleURL("pong"), to: bundleURL)
+    let reply = try await wdk.callMethod(methodName: "ping", network: "none")
+
+    // Assert
+    #expect((firstError as? CocoaError)?.code == .fileReadNoSuchFile)
+    #expect(reply as? String == "pong")
+}
+
+/// A plain run checks that every call is answered. The race between concurrent first calls is
+/// only reported under ThreadSanitizer, so run this test with it:
+/// `./Scripts/test-with-frameworks.sh --sanitize=thread --filter testConcurrentFirstCallsShareOneInitialization`
+/// ThreadSanitizer may also report bare-kit-swift's IPC.swift: rarely for this test alone, and
+/// so far always over the whole suite. That one is a false alarm that fails a run in which
+/// every test passes. Only a report that names WdkCore.swift matters here.
+@Test("Concurrent first calls share one initialization", .timeLimit(.minutes(1)))
+func testConcurrentFirstCallsShareOneInitialization() async throws {
+    // Arrange: a client that no call has started yet.
+    let wdk = WdkCore(bundlePath: fixtureBundleURL("pong").path)
+    let callCount = 1024
+    let longestDelay = 128
+
+    // Act: each call first yields a different number of times, so the calls arrive before,
+    // during and after the initialization.
+    let replies = try await withThrowingTaskGroup(of: String?.self) { group in
+        for index in 0..<callCount {
+            group.addTask {
+                for _ in 0..<(index % longestDelay) {
+                    await Task.yield()
+                }
+                return try await wdk.callMethod(methodName: "ping", network: "none") as? String
+            }
+        }
+        var replies: [String?] = []
+        for try await reply in group {
+            replies.append(reply)
+        }
+        return replies
+    }
+
+    // Assert
+    #expect(replies == Array(repeating: "pong", count: callCount))
+}
+
+// MARK: - Reader Failure
+
+/// Describes how `call` ended: the description of the error it threw, or a note that it
+/// returned or is still pending. A pending call cannot be cancelled, so awaiting it directly
+/// would hang the test run instead of failing it.
+private func outcome(of call: @escaping () async throws -> Void) async -> String? {
+    let (outcomes, continuation) = AsyncStream<String>.makeStream()
+    Task {
+        do {
+            try await call()
+            continuation.yield("returned without an error")
+        } catch {
+            continuation.yield(error.localizedDescription)
+        }
+    }
+    Task {
+        try? await Task.sleep(for: .seconds(5))
+        continuation.yield("still pending after 5 seconds")
+    }
+    return await outcomes.first { _ in true }
+}
+
+@Test("Calls made after the reader failed throw the error that ended it", .timeLimit(.minutes(1)))
+func testCallsAfterReaderFailureThrowReaderError() async throws {
+    // Arrange: a worklet whose first reply is a frame of length zero, which ends the reader.
+    let wdk = WdkCore(bundlePath: fixtureBundleURL("zero-length-reply").path)
+
+    // Act: the first call is in flight when the reader ends, the second is made afterwards.
+    let firstOutcome = await outcome { try await wdk.workletStart() }
+    let secondOutcome = await outcome {
+        _ = try await wdk.callMethod(methodName: "ping", network: "none")
+    }
+
+    // Assert
+    #expect(firstOutcome == "IPC Error: Invalid message length: 0")
+    #expect(secondOutcome == "IPC Error: Invalid message length: 0")
 }
 
 // MARK: - Standalone WDK Test

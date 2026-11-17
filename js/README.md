@@ -86,10 +86,12 @@ V8 is the default, and the engine this package is tested and released with. The 
 
 JavaScriptCore is discouraged, and the team that enables it owns the engine issues. Known issues:
 
-- **Intermittent crash on iOS 26.** The worklet can crash within the first second inside the system JavaScriptCore (`JSRopeString::resolveToBuffer`), see [#22](https://github.com/tetherto/wdk-core-swift/issues/22). Seen on BareKit 2.3.0 and 2.5.5.
+- **Intermittent crash on iOS 26.** The worklet can crash inside the system JavaScriptCore (`JSRopeString::resolveToBuffer`), within the first second or later in a session, see [#22](https://github.com/tetherto/wdk-core-swift/issues/22). Seen on BareKit 2.3.0 and 2.5.5. A second live worklet makes it more likely, so keep to one `WdkCore` instance, see [Known Limitations](../README.md#known-limitations).
 - **A worklet started from plain JavaScript source aborts** on the JavaScriptCore build of BareKit 2.5.5, see [#20](https://github.com/tetherto/wdk-core-swift/issues/20). Start a packed bundle, which is what `WdkCore` always does.
 
-Last checked on 2026-11-13 with BareKit 2.5.5. This repository's macOS suite passes on JavaScriptCore (run with `--engine javascriptcore` added to the bootstrap line of `Scripts/test-with-frameworks.sh`). On the iOS simulator the worklet answered in 9 of 9 launches on iOS 26.0, 12 of 12 on iOS 26.5 and 18 of 21 on iOS 26.3.1.
+Last checked on 2026-11-13 with BareKit 2.5.5. This repository's macOS suite passes on JavaScriptCore (run with `--engine javascriptcore` added to the bootstrap line of `Scripts/test-with-frameworks.sh`). On the iOS simulator the worklet answered a single call in 9 of 9 launches on iOS 26.0, 12 of 12 on iOS 26.5 and 18 of 21 on iOS 26.3.1.
+
+A single call understates a real session. On 2026-11-16 the full flow of the starter app (create, sign, delete, import, create again) finished in 4 of 4 launches on iOS 26.5 and in 0 of 6 on iOS 26.3.1. With the app reusing one `WdkCore` instance it finished in 3 of 6 on iOS 26.3.1. In the other runs, every crash after a delete had two or more worklets alive. On V8 the same flow finished in 8 of 8 launches.
 
 We recommend V8 until bare-stow manages the engine and phase 3a lands.
 

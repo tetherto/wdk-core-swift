@@ -18,11 +18,22 @@ import BareKit
 
 /// Thread-safe storage for in-flight JSON-RPC continuations, keyed by request ID.
 /// The reader loop resolves/rejects entries; callers register before sending.
+/// Once the reader loop has failed, no response can arrive, so no request is accepted.
 private actor PendingRequests {
     private var continuations: [Int: CheckedContinuation<[String: Any], Error>] = [:]
+    private var readerError: Error?
 
-    func register(id: Int, continuation: CheckedContinuation<[String: Any], Error>) {
+    /// Stores `continuation` until the response with `id` arrives.
+    /// - Returns: `false` if the reader loop has failed. The continuation was then resumed
+    ///   with the error that ended the loop, and the request must not be sent.
+    func register(id: Int, continuation: CheckedContinuation<[String: Any], Error>) -> Bool {
+        if let readerError {
+            continuation.resume(throwing: readerError)
+            return false
+        }
+
         continuations[id] = continuation
+        return true
     }
 
     func resolve(id: Int, with response: [String: Any]) {
@@ -33,7 +44,10 @@ private actor PendingRequests {
         continuations.removeValue(forKey: id)?.resume(throwing: error)
     }
 
-    func rejectAll(with error: Error) {
+    /// Records `error` as the failure of the reader loop and rejects every in-flight request
+    /// with it. Requests registered afterwards are refused with the same error.
+    func readerFailed(with error: Error) {
+        readerError = error
         for (_, continuation) in continuations {
             continuation.resume(throwing: error)
         }
@@ -46,6 +60,9 @@ private actor PendingRequests {
 /// Swift client for WDK operations via JSON-RPC 2.0
 /// Handles worklet lifecycle and IPC communication internally.
 /// Supports concurrent calls via ID-based response multiplexing.
+/// If reading from the worklet fails, the calls in flight and every later call on the
+/// instance throw the error that ended the reading. The instance does not recover; create a
+/// new one and initialize it again.
 public class WdkCore {
     private let worklet: Worklet
     private var ipc: IPC?
@@ -74,6 +91,9 @@ public class WdkCore {
     }
 
     /// Initialize WdkCore
+    ///
+    /// The worklet bundle is loaded by the first call made on the instance. If the bundle
+    /// cannot be found or read, that call throws and the next call tries again.
     /// - Parameters:
     ///   - bundleName: Name of the worklet bundle (default: platform-specific - "wdk-worklet.macos" on macOS, "wdk-worklet.mobile" on iOS)
     ///   - bundlePath: Optional explicit path to the bundle. If provided, this takes precedence over auto-detection.
@@ -91,7 +111,9 @@ public class WdkCore {
     deinit {
         writeContinuation?.finish()
         if isWorkletStarted {
+            // In this order: closing the IPC first aborts the process on JavaScriptCore.
             worklet.terminate()
+            ipc?.close()
         }
     }
 
@@ -137,10 +159,12 @@ public class WdkCore {
             self.worklet.start(filename: fullPath, source: bundleData)
 
             self.ipc = IPC(worklet: self.worklet)
-            self.isWorkletStarted = true
-
             self.startReaderLoop()
             self.startWriterLoop()
+
+            // Last step, so a caller that sees the flag set finds IPC, the reader and the
+            // writer in place. Under the lock because resolveInitTask() reads it under the lock.
+            self.initLock.withLock { self.isWorkletStarted = true }
         }
         initializationTask = newTask
         return newTask
@@ -148,9 +172,29 @@ public class WdkCore {
 
     /// Ensures the worklet and IPC are initialized exactly once,
     /// even when multiple callers race on the first call.
+    /// A failed initialization is not kept: the callers that were waiting for it
+    /// receive its error, and the next call starts a new one.
     private func ensureWorkletStarted() async throws {
         guard let task = resolveInitTask() else { return }
-        try await task.value
+        do {
+            try await task.value
+        } catch {
+            discardInitTask(task)
+            throw error
+        }
+    }
+
+    /// Forgets `task` after it failed, unless a newer initialization already replaced it.
+    /// Nothing else has to be undone: initialization can only fail while locating or
+    /// reading the bundle, which happens before the worklet starts.
+    /// Synchronous so that NSLock is never held across a suspension point.
+    private func discardInitTask(_ task: Task<Void, Error>) {
+        initLock.lock()
+        defer { initLock.unlock() }
+
+        if initializationTask == task {
+            initializationTask = nil
+        }
     }
 
     // MARK: - Private Helper Methods
@@ -184,7 +228,7 @@ public class WdkCore {
                     await self.pending.resolve(id: id, with: obj)
                 }
             } catch {
-                await self?.pending.rejectAll(with: error)
+                await self?.pending.readerFailed(with: error)
             }
         }
     }
@@ -224,8 +268,12 @@ public class WdkCore {
         let lengthData = Data(bytes: &length, count: 4)
         let frame = lengthData + data
 
+        guard let writeContinuation else {
+            throw WDKError.ipcError("IPC not initialized")
+        }
+
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            writeContinuation?.yield(WriteRequest(data: frame, continuation: continuation))
+            writeContinuation.yield(WriteRequest(data: frame, continuation: continuation))
         }
     }
 
@@ -233,7 +281,7 @@ public class WdkCore {
     private func readFramed() async throws -> Data {
         let lengthData = try await readExactly(bytes: 4)
         let length = lengthData.withUnsafeBytes {
-            $0.load(as: UInt32.self).bigEndian
+            $0.loadUnaligned(as: UInt32.self).bigEndian
         }
 
         guard length > 0 && length < 10_000_000 else {
@@ -281,7 +329,9 @@ public class WdkCore {
 
         let response: [String: Any] = try await withCheckedThrowingContinuation { continuation in
             Task {
-                await self.pending.register(id: id, continuation: continuation)
+                guard await self.pending.register(id: id, continuation: continuation) else {
+                    return
+                }
 
                 do {
                     try await self.writeFramed(data: requestData)
@@ -462,7 +512,8 @@ public class WdkCore {
     ///
     /// - Parameter blockchains: The blockchains to dispose. Pass a non-empty
     ///   array to release only those blockchains while keeping the WDK instance
-    ///   alive. Omit to tear the whole instance down.
+    ///   alive. Omit to wipe the seed and every registered wallet. The worklet
+    ///   keeps running; see Known Limitations in the README.
     public func dispose(blockchains: [String] = []) async throws {
         var params: [String: Any] = [:]
         if !blockchains.isEmpty {
