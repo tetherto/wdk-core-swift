@@ -458,7 +458,7 @@ struct WDKOperationTests {
           "networks": {
             "ethereum": {
               "blockchain": "ethereum",
-              "config": { "chainId": 1, "rpcUrl": "https://eth.llamarpc.com" }
+              "config": { "chainId": 1, "provider": "https://eth.llamarpc.com" }
             }
           }
         }

@@ -60,7 +60,7 @@ include:
 packages:
   WdkCore:
     url: https://github.com/tetherto/wdk-core-swift
-    branch: main
+    exactVersion: 0.9.0
 
 options:
   # Builds the bundle, the addons and BareKit with the wdk-core-swift revision named above.
@@ -180,7 +180,7 @@ Include `OS=` (or use `id=<udid>`) in the `xcodebuild` destination when several 
 Clone this repository anywhere and run the same script by hand:
 
 ```bash
-git clone https://github.com/tetherto/wdk-core-swift
+git clone --branch v0.9.0 https://github.com/tetherto/wdk-core-swift
 wdk-core-swift/js/scripts/bootstrap-app.sh --platform ios --app-root /path/to/MyApp
 ```
 
@@ -190,7 +190,7 @@ It leaves `wdk-worklet.mobile.bundle`, `addons/` and `frameworks/BareKit.xcframe
 2. **Worklet bundle**: drag it into the project navigator and make sure it appears in **Build Phases > Copy Bundle Resources**.
 3. **Addon xcframeworks**: drag all of `addons/*.xcframework` into your project and set them to **Embed & Sign**.
 
-Add this repository under **File > Add Package Dependencies** for the `WdkCore` Swift API, then build and run.
+Add this repository under **File > Add Package Dependencies** with the dependency rule **Exact Version** `0.9.0` for the `WdkCore` Swift API, then build and run.
 
 ## Example
 
@@ -222,7 +222,7 @@ let config = """
     "networks": {
         "ethereum": {
             "blockchain": "ethereum",
-            "config": { "chainId": 1, "rpcUrl": "https://eth-mainnet.example.com" }
+            "config": { "chainId": 1, "provider": "https://eth-mainnet.example.com" }
         }
     }
 }
@@ -291,7 +291,7 @@ let wdk = WdkCore(bundlePath: "/path/to/wdk-worklet.mobile.bundle")
 
 ## Error Handling
 
-All methods throw `WDKError` with the following cases:
+Most failures are thrown as `WDKError`, with the cases below. Errors from reading the bundle file and from BareKit's IPC are passed on unchanged, for example a `CocoaError` when `bundlePath` names a missing file.
 
 ```swift
 public enum WDKError: Error {
@@ -332,6 +332,23 @@ Replace the instance only when it can no longer be used:
 After a read failure, the replaced instance is released and its worklet terminated once the app drops its last reference to it. After a call that never returns, it stays in memory until the process exits.
 
 **Why this is not fixed on this line.** Ending a worklet means closing its IPC while the instance is waiting to read from it, and with BareKit 2.5.5, the last 2.x release, that can crash the process. Ending the worklet without closing the IPC leaks file descriptors and leaves the reader spinning. BareKit 3.0 reworked the IPC lifecycle, but it has no Objective-C API and this package does not support it yet. Teardown, call timeouts and cancellation are planned with the move to BareKit 3.x in [#24](https://github.com/tetherto/wdk-core-swift/issues/24). The missing teardown is tracked in [#13](https://github.com/tetherto/wdk-core-swift/issues/13).
+
+### `WdkCore` is not `Sendable`
+
+In the Swift 6 language mode, the compiler rejects an instance that is stored in an actor or a `@MainActor` type, or that is shared between concurrent tasks, with `sending 'self.wdk' risks causing data races`. The instance supports concurrent calls, so mark the property or the global that holds it `nonisolated(unsafe)`:
+
+```swift
+@MainActor
+final class WalletModel {
+    nonisolated(unsafe) private let wdk = WdkCore()
+}
+```
+
+A target that builds in the Swift 5 language mode compiles without it.
+
+### An uncaught JavaScript error inside the worklet ends the app
+
+An error thrown by a wallet call comes back to Swift as `WDKError.rpcError`. An error that nothing catches inside the worklet is different: the worklet runs in the app's process, and the process is aborted (signal 6). Swift cannot catch it. We have only seen this with a test worklet that throws when a request arrives, on macOS with BareKit 2.5.5 on V8, not with the WDK worklet. Keeping the app alive when the worklet crashes is part of [#24](https://github.com/tetherto/wdk-core-swift/issues/24).
 
 ## Architecture
 
