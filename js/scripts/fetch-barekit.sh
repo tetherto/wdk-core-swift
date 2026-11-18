@@ -35,11 +35,17 @@ set -euo pipefail
 #   - The release archive (about 400 MB, every platform) is kept in
 #     ~/Library/Caches/wdk-core-swift so other platforms, engines and repeat
 #     runs do not download it again. Delete that directory to force a download.
+#   - The archive of the default release is checked against its SHA-256 each
+#     time a framework is extracted from it, also when it comes from the cache.
+#     An archive that does not match is removed and nothing is extracted. Other
+#     tags have no known SHA-256 here and are used unchecked, with a warning.
 #
 # Exit status: 0 on success, 1 on any error (message on stderr).
 # =============================================================================
 
 readonly DEFAULT_TAG="v2.5.5"
+# SHA-256 of prebuilds.zip of DEFAULT_TAG, as published for the release asset. Change both together.
+readonly DEFAULT_TAG_SHA256="fc68740347c8532ba49d45bf61fae9ca1f1040dc7d6c99f2f92dc30c40e84e46"
 readonly SUPPORTED_TAG_PATTERN='^v2\.[0-9]+\.[0-9]+$'
 readonly RELEASES_URL="https://github.com/holepunchto/bare-kit/releases/download"
 readonly ARCHIVE_NAME="prebuilds.zip"
@@ -67,6 +73,26 @@ verify_v2_api() {
 WdkCore on this line needs BareKit 2.x (tested: $DEFAULT_TAG, V8). BareKit 3.x has no Objective-C API
 and is adopted with the bare-stow rework (tetherto/wdk-worklet-bundler#84, phase 3a).
 Remove $framework and run again to fetch $DEFAULT_TAG."
+  fi
+}
+
+# Fails unless the archive of the default release has the SHA-256 recorded above.
+# Other tags have no recorded SHA-256 and are only announced as unchecked.
+verify_archive() {
+  local archive="$1" actual
+  if [ "$TAG" != "$DEFAULT_TAG" ]; then
+    echo "⚠️  BareKit $TAG is not the pinned release ($DEFAULT_TAG): its $ARCHIVE_NAME is not checked" >&2
+    echo "   against a known SHA-256." >&2
+    return
+  fi
+  actual="$(shasum -a 256 "$archive" | cut -d ' ' -f 1)"
+  if [ "$actual" != "$DEFAULT_TAG_SHA256" ]; then
+    rm -f "${archive:?}"
+    die "the $ARCHIVE_NAME for $TAG does not have the expected SHA-256 and has been removed.
+  expected: $DEFAULT_TAG_SHA256
+  actual:   $actual
+Nothing was extracted. Run again to download it. If it fails again, the download is being
+altered or the release asset changed: do not use it."
   fi
 }
 
@@ -140,6 +166,8 @@ Check the tag exists at https://github.com/holepunchto/bare-kit/releases and tha
   fi
   mv "$archive.partial" "$archive"
 fi
+
+verify_archive "$archive"
 
 if ! unzip -Z1 "$archive" >/dev/null 2>&1; then
   rm -f "${archive:?}"
