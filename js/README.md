@@ -32,7 +32,7 @@ Things worth knowing:
 
 - **Repeat runs are instant and work offline.** Nothing is rebuilt while the configuration, the pinned toolchain, the engine, the BareKit release and the destinations are unchanged and the outputs are still in place. `WDK_REFRESH=1` skips that check.
 - **Only what the script installed is replaced.** It records the addons it put in `addons/` and removes exactly those on the next run. A `BareKit.xcframework` you placed yourself is used as it is, as long as it is a 2.x framework.
-- **The BareKit archive is cached.** A release archive is about 400 MB and holds every platform, so it is kept in `~/Library/Caches/wdk-core-swift`. Delete that directory to force a new download.
+- **The BareKit archive is cached.** A release archive is about 400 MB and holds every platform, so it is kept in `~/Library/Caches/wdk-core-swift`. Delete that directory to force a new download. The archive of the pinned release is checked against its SHA-256 before a framework is extracted from it; a `--barekit-tag` other than the pinned one is used unchecked, with a warning.
 - **One build at a time per checkout.** Two apps that share one checkout of this repository wait for each other.
 
 ## The worklet configuration
